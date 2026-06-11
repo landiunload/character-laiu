@@ -5,14 +5,34 @@
 @inject BrowserFileDownloadService FileDownloadService
 @inject IJSRuntime JavascriptRuntime
 
-<PageTitle>Где он лёг — анкета персонажа</PageTitle>
+<PageTitle>Character-laiu — анкета персонажа</PageTitle>
 
 <div class="application-layout">
     <aside class="characters-sidebar">
         <header class="sidebar-header">
-            <h1 class="application-title">Где он лёг</h1>
+            <h1 class="application-title">Character-laiu</h1>
             <button class="theme-toggle-button" title="Переключить тему" @onclick="ToggleThemeAsync">@(_currentThemeName == "dark" ? "☀" : "🌙")</button>
         </header>
+
+        @* Все действия — сверху, чтобы не тянуться вниз страницы *@
+        <div class="sidebar-actions">
+            <button class="primary-button" @onclick="CreateCharacterProfileAsync">+ Новый герой</button>
+
+            <div class="action-buttons-row">
+                <button class="secondary-button" title="Дублировать героя" @onclick="DuplicateSelectedCharacterProfileAsync" disabled="@(_selectedCharacterProfile is null)">Копия</button>
+                <button class="secondary-button" title="Открыть диалог печати" @onclick="PrintCurrentProfileAsync" disabled="@(_selectedCharacterProfile is null)">Печать</button>
+                <button class="danger-button" title="Удалить героя" @onclick="DeleteSelectedCharacterProfileAsync" disabled="@(_selectedCharacterProfile is null)">Удалить</button>
+            </div>
+
+            <div class="action-buttons-row">
+                <button class="secondary-button" title="Скачать готовый документ" @onclick="ExportSelectedProfileAsMarkdownAsync" disabled="@(_selectedCharacterProfile is null)">Markdown</button>
+                <button class="secondary-button" title="Скачать резервную копию" @onclick="ExportSelectedProfileAsJsonAsync" disabled="@(_selectedCharacterProfile is null)">JSON</button>
+                <label class="secondary-button import-label" title="Загрузить героя из файла">
+                    Импорт
+                    <InputFile OnChange="ImportProfileFromJsonAsync" accept=".json" class="hidden-file-input" />
+                </label>
+            </div>
+        </div>
 
         <ul class="characters-list">
             @foreach (var characterProfile in _allCharacterProfiles)
@@ -24,24 +44,6 @@
                 </li>
             }
         </ul>
-
-        <div class="sidebar-actions">
-            <button class="primary-button" @onclick="CreateCharacterProfileAsync">+ Новый герой</button>
-            @if (_selectedCharacterProfile is not null)
-            {
-                <button class="secondary-button" @onclick="DuplicateSelectedCharacterProfileAsync">Дублировать</button>
-                <button class="danger-button" @onclick="DeleteSelectedCharacterProfileAsync">Удалить</button>
-            }
-        </div>
-
-        <div class="sidebar-actions">
-            <button class="secondary-button" @onclick="ExportSelectedProfileAsMarkdownAsync" disabled="@(_selectedCharacterProfile is null)">Экспорт Markdown</button>
-            <button class="secondary-button" @onclick="ExportSelectedProfileAsJsonAsync" disabled="@(_selectedCharacterProfile is null)">Экспорт JSON</button>
-            <label class="secondary-button import-label">
-                Импорт JSON
-                <InputFile OnChange="ImportProfileFromJsonAsync" accept=".json" class="hidden-file-input" />
-            </label>
-        </div>
     </aside>
 
     <main class="questionnaire-editor">
@@ -56,13 +58,18 @@
                    placeholder="Имя героя"
                    @oninput="OnCharacterNameChangedAsync" />
 
-            @foreach (var section in _selectedCharacterProfile.Sections)
+            @foreach (var (section, sectionIndex) in _selectedCharacterProfile.Sections.Select((value, index) => (value, index)))
             {
                 <section class="questionnaire-section">
                     <header class="section-header">
-                        <span class="section-icon">@section.Icon</span>
+                        @* Значок — обычное редактируемое поле фиксированной ширины, всегда выровнен *@
+                        <input class="section-icon-input" maxlength="2" title="Значок раздела — можно заменить" @bind="section.Icon" @bind:after="PersistChangesAsync" />
                         <input class="section-title-input" @bind="section.Title" @bind:after="PersistChangesAsync" />
-                        <button class="icon-button" title="Удалить раздел" @onclick="() => RemoveSectionAsync(section.Identifier)">✕</button>
+                        <span class="row-controls">
+                            <button class="icon-button" title="Раздел выше" disabled="@(sectionIndex == 0)" @onclick="() => MoveSectionAsync(section.Identifier, -1)">↑</button>
+                            <button class="icon-button" title="Раздел ниже" disabled="@(sectionIndex == _selectedCharacterProfile.Sections.Count - 1)" @onclick="() => MoveSectionAsync(section.Identifier, 1)">↓</button>
+                            <button class="icon-button" title="Удалить раздел" @onclick="() => RemoveSectionAsync(section.Identifier)">✕</button>
+                        </span>
                     </header>
 
                     @if (!string.IsNullOrWhiteSpace(section.Hint))
@@ -80,26 +87,23 @@
                         </div>
                     }
 
-                    @foreach (var field in section.Fields)
+                    @foreach (var (field, fieldIndex) in section.Fields.Select((value, index) => (value, index)))
                     {
-                        <div class="@(field.FieldType == QuestionnaireFieldType.PairedValues ? "field-row paired" : "field-row")">
+                        <div class="@FieldRowCssClass(field)">
                             <input class="field-label-input" @bind="field.Label" @bind:after="PersistChangesAsync" />
 
+                            @* Все поля многострочные и растут под содержимое *@
+                            <textarea class="field-value-textarea" rows="1" @bind="field.PrimaryValue" @bind:after="PersistChangesAsync"></textarea>
                             @if (field.FieldType == QuestionnaireFieldType.PairedValues)
                             {
-                                <input class="field-value-input" @bind="field.PrimaryValue" @bind:after="PersistChangesAsync" />
-                                <input class="field-value-input" @bind="field.SecondaryValue" @bind:after="PersistChangesAsync" />
-                            }
-                            else if (field.FieldType == QuestionnaireFieldType.MultiLine)
-                            {
-                                <textarea class="field-value-textarea" @bind="field.PrimaryValue" @bind:after="PersistChangesAsync"></textarea>
-                            }
-                            else
-                            {
-                                <input class="field-value-input" @bind="field.PrimaryValue" @bind:after="PersistChangesAsync" />
+                                <textarea class="field-value-textarea" rows="1" @bind="field.SecondaryValue" @bind:after="PersistChangesAsync"></textarea>
                             }
 
-                            <button class="icon-button" title="Удалить поле" @onclick="() => RemoveFieldAsync(section, field.Identifier)">✕</button>
+                            <span class="row-controls">
+                                <button class="icon-button" title="Поле выше" disabled="@(fieldIndex == 0)" @onclick="() => MoveFieldAsync(section, field.Identifier, -1)">↑</button>
+                                <button class="icon-button" title="Поле ниже" disabled="@(fieldIndex == section.Fields.Count - 1)" @onclick="() => MoveFieldAsync(section, field.Identifier, 1)">↓</button>
+                                <button class="icon-button" title="Удалить поле" @onclick="() => RemoveFieldAsync(section, field.Identifier)">✕</button>
+                            </span>
                         </div>
                     }
 
@@ -125,6 +129,13 @@
 
         var savedThemeName = await JavascriptRuntime.InvokeAsync<string>("charlaiuInterop.readSavedTheme");
         _currentThemeName = string.IsNullOrWhiteSpace(savedThemeName) ? "light" : savedThemeName;
+    }
+
+    /// <summary>CSS-классы строки поля: пустые поля скрываются в печатной версии.</summary>
+    private static string FieldRowCssClass(QuestionnaireField field)
+    {
+        var cssClass = field.FieldType == QuestionnaireFieldType.PairedValues ? "field-row paired" : "field-row";
+        return field.HasAnyValue ? cssClass : cssClass + " empty-field";
     }
 
     /// <summary>Сохраняет всех героев и отмечает выбранного изменённым.</summary>
@@ -188,6 +199,12 @@
         await PersistChangesAsync();
     }
 
+    private async Task MoveSectionAsync(Guid sectionIdentifier, int positionOffset)
+    {
+        _selectedCharacterProfile?.MoveSection(sectionIdentifier, positionOffset);
+        await PersistChangesAsync();
+    }
+
     private async Task AddFieldAsync(QuestionnaireSection section)
     {
         section.AddField();
@@ -200,11 +217,21 @@
         await PersistChangesAsync();
     }
 
+    private async Task MoveFieldAsync(QuestionnaireSection section, Guid fieldIdentifier, int positionOffset)
+    {
+        section.MoveField(fieldIdentifier, positionOffset);
+        await PersistChangesAsync();
+    }
+
     private async Task ToggleThemeAsync()
     {
         _currentThemeName = _currentThemeName == "dark" ? "light" : "dark";
         await JavascriptRuntime.InvokeVoidAsync("charlaiuInterop.applyTheme", _currentThemeName);
     }
+
+    /// <summary>Открывает системный диалог печати — печатную версию оформляет CSS.</summary>
+    private async Task PrintCurrentProfileAsync() =>
+        await JavascriptRuntime.InvokeVoidAsync("window.print");
 
     private async Task ExportSelectedProfileAsMarkdownAsync() =>
         await ExportSelectedProfileAsync(MarkdownExporter);

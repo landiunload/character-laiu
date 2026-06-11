@@ -36,6 +36,24 @@ public sealed class QuestionnaireSection
     public void RemoveField(Guid fieldIdentifier) =>
         Fields.RemoveAll(candidateField => candidateField.Identifier == fieldIdentifier);
 
+
+    /// <summary>
+    /// Сдвигает поле вверх или вниз по разделу.
+    /// Смещение за границы списка молча игнорируется.
+    /// </summary>
+    public void MoveField(Guid fieldIdentifier, int positionOffset)
+    {
+        var currentIndex = Fields.FindIndex(candidateField => candidateField.Identifier == fieldIdentifier);
+        var targetIndex = currentIndex + positionOffset;
+
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= Fields.Count)
+        {
+            return;
+        }
+
+        (Fields[currentIndex], Fields[targetIndex]) = (Fields[targetIndex], Fields[currentIndex]);
+    }
+
     /// <summary>Создаёт глубокую копию раздела с новыми идентификаторами.</summary>
     public QuestionnaireSection Clone() => new()
     {

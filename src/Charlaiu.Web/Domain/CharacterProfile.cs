@@ -36,6 +36,24 @@ public sealed class CharacterProfile
     public void RemoveSection(Guid sectionIdentifier) =>
         Sections.RemoveAll(candidateSection => candidateSection.Identifier == sectionIdentifier);
 
+
+    /// <summary>
+    /// Сдвигает раздел вверх или вниз по списку.
+    /// Смещение за границы списка молча игнорируется — кнопки можно нажимать без проверок.
+    /// </summary>
+    public void MoveSection(Guid sectionIdentifier, int positionOffset)
+    {
+        var currentIndex = Sections.FindIndex(candidateSection => candidateSection.Identifier == sectionIdentifier);
+        var targetIndex = currentIndex + positionOffset;
+
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= Sections.Count)
+        {
+            return;
+        }
+
+        (Sections[currentIndex], Sections[targetIndex]) = (Sections[targetIndex], Sections[currentIndex]);
+    }
+
     /// <summary>Создаёт глубокую копию анкеты с новыми идентификаторами.</summary>
     public CharacterProfile Clone() => new()
     {

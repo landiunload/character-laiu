@@ -34,22 +34,34 @@ body {
 
 .application-layout { display: flex; min-height: 100vh; }
 
-/* Боковая панель со списком героев */
+/* Боковая панель: прилипает к экрану, все действия — сверху */
 .characters-sidebar {
-  width: 260px;
+  width: 270px;
   flex-shrink: 0;
   padding: 1rem;
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.9rem;
+  position: sticky;
+  top: 0;
+  height: 100vh;
 }
 
 .sidebar-header { display: flex; align-items: center; justify-content: space-between; }
-.application-title { font-size: 1.25rem; margin: 0; }
+.application-title { font-size: 1.2rem; margin: 0; letter-spacing: 0.02em; }
 .theme-toggle-button { background: none; border: none; font-size: 1.1rem; cursor: pointer; }
 
-.characters-list { list-style: none; margin: 0; padding: 0; flex: 1; overflow-y: auto; }
+.sidebar-actions { display: flex; flex-direction: column; gap: 6px; }
+.action-buttons-row { display: flex; gap: 6px; }
+.action-buttons-row > * { flex: 1; }
+
+.characters-list {
+  list-style: none; margin: 0; padding: 0;
+  flex: 1; overflow-y: auto;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.6rem;
+}
 .character-item { margin-bottom: 4px; }
 .character-select-button {
   width: 100%; text-align: left; padding: 8px 10px;
@@ -60,21 +72,20 @@ body {
   background: var(--surface-color); border-color: var(--border-color); font-weight: bold;
 }
 
-.sidebar-actions { display: flex; flex-direction: column; gap: 6px; }
-
 .primary-button, .secondary-button, .danger-button {
-  padding: 8px 10px; border-radius: 8px; font: inherit; cursor: pointer; text-align: center;
+  padding: 8px 10px; border-radius: 8px; font: inherit; font-size: 0.92rem;
+  cursor: pointer; text-align: center;
 }
 .primary-button { background: var(--accent-color); color: var(--accent-text-color); border: none; }
 .secondary-button { background: var(--surface-color); color: var(--text-color); border: 1px solid var(--border-color); }
-.secondary-button:disabled { opacity: 0.45; cursor: default; }
+.secondary-button:disabled, .danger-button:disabled { opacity: 0.45; cursor: default; }
 .danger-button { background: none; color: var(--danger-color); border: 1px solid var(--danger-color); }
 
 .import-label { display: block; cursor: pointer; }
 .hidden-file-input { display: none; }
 
 /* Редактор анкеты */
-.questionnaire-editor { flex: 1; max-width: 860px; padding: 1.5rem 2rem; }
+.questionnaire-editor { flex: 1; max-width: 880px; padding: 1.5rem 2rem; }
 .empty-state-message { color: var(--muted-text-color); }
 
 .character-name-input {
@@ -89,39 +100,51 @@ body {
 }
 
 .section-header { display: flex; align-items: center; gap: 8px; }
-.section-icon { font-size: 1.1rem; }
+
+/* Значок раздела: фиксированная ширина и центрирование — всегда выровнен, всегда редактируем */
+.section-icon-input {
+  width: 2.2em; text-align: center; font: inherit; font-size: 1.05rem;
+  background: var(--background-color); border: 1px solid transparent; border-radius: 8px;
+  color: var(--text-color); padding: 4px 0; outline: none;
+}
+.section-icon-input:hover, .section-icon-input:focus { border-color: var(--border-color); }
+
 .section-title-input {
   flex: 1; font: inherit; font-size: 1.1rem; font-weight: bold;
   background: none; border: none; color: var(--text-color); outline: none;
 }
 .section-hint { color: var(--muted-text-color); font-style: italic; font-size: 0.9rem; margin: 6px 0 10px; }
 
+.row-controls { display: flex; gap: 2px; align-items: center; }
+
 .paired-columns-header {
-  display: grid; grid-template-columns: 160px 1fr 1fr 28px; gap: 8px;
+  display: grid; grid-template-columns: 160px 1fr 1fr 76px; gap: 8px;
   color: var(--muted-text-color); font-size: 0.85rem; margin-top: 10px;
 }
 
-.field-row { display: grid; grid-template-columns: 160px 1fr 28px; gap: 8px; align-items: start; margin-top: 8px; }
-.field-row.paired { grid-template-columns: 160px 1fr 1fr 28px; }
+.field-row { display: grid; grid-template-columns: 160px 1fr 76px; gap: 8px; align-items: start; margin-top: 8px; }
+.field-row.paired { grid-template-columns: 160px 1fr 1fr 76px; }
 
 .field-label-input {
   font: inherit; font-size: 0.9rem; color: var(--muted-text-color);
   background: none; border: none; outline: none; padding-top: 8px;
 }
 
-.field-value-input, .field-value-textarea {
+/* Все поля многострочные и растут под содержимое (field-sizing), min-height — запасной вариант */
+.field-value-textarea {
   font: inherit; width: 100%; padding: 7px 9px;
   background: var(--background-color); color: var(--text-color);
   border: 1px solid var(--border-color); border-radius: 8px; outline: none;
+  resize: vertical; min-height: 2.5em; field-sizing: content;
 }
-.field-value-textarea { min-height: 64px; resize: vertical; }
-.field-value-input:focus, .field-value-textarea:focus { border-color: var(--accent-color); }
+.field-value-textarea:focus { border-color: var(--accent-color); }
 
 .icon-button {
   background: none; border: none; color: var(--muted-text-color);
-  cursor: pointer; padding-top: 8px;
+  cursor: pointer; padding: 8px 3px 0; font-size: 0.95rem;
 }
-.icon-button:hover { color: var(--danger-color); }
+.icon-button:hover:not(:disabled) { color: var(--danger-color); }
+.icon-button:disabled { opacity: 0.25; cursor: default; }
 
 .add-field-button, .add-section-button {
   margin-top: 10px; background: none; border: 1px dashed var(--border-color);
@@ -134,7 +157,45 @@ body {
 /* Телефон: панель сверху, анкета под ней */
 @media (max-width: 720px) {
   .application-layout { flex-direction: column; }
-  .characters-sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border-color); }
+  .characters-sidebar { width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid var(--border-color); }
   .questionnaire-editor { padding: 1rem; }
   .field-row, .field-row.paired, .paired-columns-header { grid-template-columns: 1fr; }
+  .row-controls { justify-content: flex-end; }
+}
+
+/* Печатная версия: только содержимое анкеты, без панелей, кнопок и пустых полей */
+@media print {
+  :root {
+    --background-color: #ffffff;
+    --surface-color: #ffffff;
+    --text-color: #000000;
+    --muted-text-color: #555555;
+    --border-color: #bbbbbb;
+  }
+
+  .characters-sidebar, .row-controls, .add-field-button, .add-section-button { display: none !important; }
+  .field-row.empty-field { display: none !important; }
+
+  .application-layout { display: block; }
+  .questionnaire-editor { max-width: none; padding: 0; }
+
+  .character-name-input { border-bottom: 2px solid #000; font-size: 1.8rem; }
+
+  .questionnaire-section {
+    border: none; border-radius: 0; padding: 0.4rem 0 0.8rem;
+    border-bottom: 1px solid var(--border-color);
+    break-inside: avoid;
+  }
+
+  .section-icon-input { background: none; border: none; }
+  .section-hint { display: none; }
+
+  .field-row { grid-template-columns: 170px 1fr; }
+  .field-row.paired { grid-template-columns: 170px 1fr 1fr; }
+  .paired-columns-header { grid-template-columns: 170px 1fr 1fr; }
+
+  .field-value-textarea {
+    border: none; background: none; padding: 4px 0;
+    resize: none; min-height: 0; field-sizing: content;
+  }
 }
