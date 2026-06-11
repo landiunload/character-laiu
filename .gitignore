@@ -13,3 +13,5 @@ TestResults/
 
 # Локальные логи запуска
 *.log
+
+publish_out/
