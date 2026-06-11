@@ -1,0 +1,12 @@
+@* Встроенная SVG-иконка: всегда выровнена по сетке и окрашена в цвет текста (currentColor) *@
+<svg class="application-icon" viewBox="0 0 24 24" width="@Size" height="@Size" fill="currentColor" aria-hidden="true">
+    <path d="@IconCatalog.IconPathsByName[IconCatalog.ResolveIconName(IconName)]" />
+</svg>
+
+@code {
+    /// <summary>Имя иконки из каталога.</summary>
+    [Parameter] public string IconName { get; set; } = "star";
+
+    /// <summary>Размер в пикселях.</summary>
+    [Parameter] public int Size { get; set; } = 20;
+}

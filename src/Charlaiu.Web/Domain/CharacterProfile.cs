@@ -24,10 +24,17 @@ public sealed class CharacterProfile
     /// <summary>Отмечает анкету изменённой — обновляет время последнего изменения.</summary>
     public void MarkAsUpdated() => UpdatedAtUtc = DateTimeOffset.UtcNow;
 
-    /// <summary>Добавляет новый раздел в конец анкеты.</summary>
-    public void AddSection()
+    /// <summary>Добавляет новый раздел в конец анкеты — обычный или с двумя колонками.</summary>
+    public void AddSection(bool withPairedColumns = false)
     {
         var createdSection = new QuestionnaireSection { Title = "Новый раздел" };
+
+        if (withPairedColumns)
+        {
+            createdSection.FirstColumnLabel = "Первая колонка";
+            createdSection.SecondColumnLabel = "Вторая колонка";
+        }
+
         createdSection.AddField();
         Sections.Add(createdSection);
     }

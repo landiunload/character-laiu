@@ -11,7 +11,7 @@ public sealed class QuestionnaireSection
     public Guid Identifier { get; set; } = Guid.CreateVersion7();
 
     /// <summary>Эмодзи-значок раздела.</summary>
-    public string Icon { get; set; } = "✦";
+    public string Icon { get; set; } = "star";
 
     /// <summary>Заголовок раздела.</summary>
     public string Title { get; set; } = string.Empty;
@@ -28,9 +28,18 @@ public sealed class QuestionnaireSection
     /// <summary>Поля раздела.</summary>
     public List<QuestionnaireField> Fields { get; set; } = [];
 
-    /// <summary>Добавляет новое пустое поле в конец раздела.</summary>
-    public void AddField() =>
-        Fields.Add(QuestionnaireField.Create("Новое поле", QuestionnaireFieldType.MultiLine));
+    /// <summary>
+    /// Добавляет новое пустое поле в конец раздела.
+    /// В разделе с колонками новое поле тоже парное — иначе колонки разъедутся.
+    /// </summary>
+    public void AddField()
+    {
+        var newFieldType = FirstColumnLabel is not null
+            ? QuestionnaireFieldType.PairedValues
+            : QuestionnaireFieldType.MultiLine;
+
+        Fields.Add(QuestionnaireField.Create("Новое поле", newFieldType));
+    }
 
     /// <summary>Удаляет поле по идентификатору.</summary>
     public void RemoveField(Guid fieldIdentifier) =>

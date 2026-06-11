@@ -1,20 +1,27 @@
 @page "/"
 @inject ICharacterProfileRepository CharacterProfileRepository
+@inject ICharacterRelationshipRepository CharacterRelationshipRepository
 @inject MarkdownQuestionnaireExporter MarkdownExporter
 @inject JsonQuestionnaireExporter JsonExporter
 @inject BrowserFileDownloadService FileDownloadService
 @inject IJSRuntime JavascriptRuntime
 
-<PageTitle>Character-laiu — анкета персонажа</PageTitle>
+<PageTitle>character laiu — анкета персонажа</PageTitle>
 
 <div class="application-layout">
     <aside class="characters-sidebar">
         <header class="sidebar-header">
-            <h1 class="application-title">Character-laiu</h1>
-            <button class="theme-toggle-button" title="Переключить тему" @onclick="ToggleThemeAsync">@(_currentThemeName == "dark" ? "☀" : "🌙")</button>
+            <h1 class="application-title">character laiu</h1>
+            <button class="theme-toggle-button" title="Переключить тему" @onclick="ToggleThemeAsync">
+                <ApplicationIcon IconName="@(_currentThemeName == "dark" ? "lightbulb" : "moon")" Size="18" />
+            </button>
         </header>
 
-        @* Все действия — сверху, чтобы не тянуться вниз страницы *@
+        <div class="view-switch">
+            <button class="@ViewSwitchCssClass("questionnaire")" @onclick="@(() => _activeViewName = "questionnaire")">Анкета</button>
+            <button class="@ViewSwitchCssClass("relationships")" @onclick="@(() => _activeViewName = "relationships")">Связи</button>
+        </div>
+
         <div class="sidebar-actions">
             <button class="primary-button" @onclick="CreateCharacterProfileAsync">+ Новый герой</button>
 
@@ -39,13 +46,96 @@
             {
                 <li class="@(characterProfile.Identifier == _selectedCharacterProfile?.Identifier ? "character-item selected" : "character-item")">
                     <button class="character-select-button" @onclick="() => SelectCharacterProfile(characterProfile)">
-                        @(string.IsNullOrWhiteSpace(characterProfile.DisplayName) ? "Без имени" : characterProfile.DisplayName)
+                        @DisplayNameOf(characterProfile)
                     </button>
                 </li>
             }
         </ul>
     </aside>
 
+    @if (_activeViewName == "relationships")
+    {
+        <main class="relationships-view">
+            <h2 class="view-heading">Связи персонажей</h2>
+
+            @if (_allCharacterProfiles.Count < 2)
+            {
+                <p class="empty-state-message">Создай хотя бы двух героев — и здесь можно будет связать их дружбой, враждой или чем угодно ещё.</p>
+            }
+            else
+            {
+                <div class="relationship-form">
+                    <select class="relationship-select" @bind="_newRelationshipFirstIdentifier">
+                        <option value="@Guid.Empty">— первый герой —</option>
+                        @foreach (var characterProfile in _allCharacterProfiles)
+                        {
+                            <option value="@characterProfile.Identifier">@DisplayNameOf(characterProfile)</option>
+                        }
+                    </select>
+
+                    <select class="relationship-select" @bind="_newRelationshipPresetName" @bind:after="ApplyRelationshipPreset">
+                        @foreach (var presetName in RelationshipPresets.Keys)
+                        {
+                            <option value="@presetName">@presetName</option>
+                        }
+                    </select>
+
+                    <select class="relationship-select" @bind="_newRelationshipSecondIdentifier">
+                        <option value="@Guid.Empty">— второй герой —</option>
+                        @foreach (var characterProfile in _allCharacterProfiles)
+                        {
+                            <option value="@characterProfile.Identifier">@DisplayNameOf(characterProfile)</option>
+                        }
+                    </select>
+
+                    <input class="relationship-label-input" placeholder="Подпись связи" @bind="_newRelationshipLabel" />
+                    <button class="primary-button" @onclick="AddRelationshipAsync">Связать</button>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_relationshipFormMessage))
+                {
+                    <p class="form-message">@_relationshipFormMessage</p>
+                }
+
+                var graphNodes = CalculateGraphNodes();
+                <svg class="relationships-graph" viewBox="0 0 800 520">
+                    @foreach (var relationship in VisibleRelationships())
+                    {
+                        var firstNode = graphNodes.First(node => node.Profile.Identifier == relationship.FirstCharacterIdentifier);
+                        var secondNode = graphNodes.First(node => node.Profile.Identifier == relationship.SecondCharacterIdentifier);
+                        var labelX = (firstNode.X + secondNode.X) / 2;
+                        var labelY = (firstNode.Y + secondNode.Y) / 2 - 6;
+
+                        <line x1="@Fmt(firstNode.X)" y1="@Fmt(firstNode.Y)" x2="@Fmt(secondNode.X)" y2="@Fmt(secondNode.Y)"
+                              stroke="@relationship.ColorHex" stroke-width="2.5" />
+                        @((MarkupString)$"<text x=\"{Fmt(labelX)}\" y=\"{Fmt(labelY)}\" class=\"graph-edge-label\" fill=\"{relationship.ColorHex}\">{System.Net.WebUtility.HtmlEncode(relationship.Label)}</text>")
+                    }
+
+                    @foreach (var graphNode in graphNodes)
+                    {
+                        <circle cx="@Fmt(graphNode.X)" cy="@Fmt(graphNode.Y)" r="30" class="graph-node-circle" />
+                        @((MarkupString)$"<text x=\"{Fmt(graphNode.X)}\" y=\"{Fmt(graphNode.Y + 48)}\" class=\"graph-node-label\">{System.Net.WebUtility.HtmlEncode(DisplayNameOf(graphNode.Profile))}</text>")
+                    }
+                </svg>
+
+                @if (VisibleRelationships().Any())
+                {
+                    <ul class="relationships-list">
+                        @foreach (var relationship in VisibleRelationships())
+                        {
+                            <li class="relationship-item">
+                                <span class="relationship-color-dot" style="background:@relationship.ColorHex"></span>
+                                <span>@NameByIdentifier(relationship.FirstCharacterIdentifier) — <strong>@relationship.Label</strong> — @NameByIdentifier(relationship.SecondCharacterIdentifier)</span>
+                                <button class="icon-button" title="Удалить связь" @onclick="() => DeleteRelationshipAsync(relationship.Identifier)">✕</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            }
+        </main>
+    }
+    else
+    {
     <main class="questionnaire-editor">
         @if (_selectedCharacterProfile is null)
         {
@@ -62,8 +152,22 @@
             {
                 <section class="questionnaire-section">
                     <header class="section-header">
-                        @* Значок — обычное редактируемое поле фиксированной ширины, всегда выровнен *@
-                        <input class="section-icon-input" maxlength="2" title="Значок раздела — можно заменить" @bind="section.Icon" @bind:after="PersistChangesAsync" />
+                        <span class="icon-picker-anchor">
+                            <button class="section-icon-button" title="Выбрать иконку раздела" @onclick="() => ToggleIconPicker(section.Identifier)">
+                                <ApplicationIcon IconName="@section.Icon" Size="20" />
+                            </button>
+                            @if (_iconPickerSectionIdentifier == section.Identifier)
+                            {
+                                <div class="icon-picker-popup">
+                                    @foreach (var iconName in IconCatalog.IconPathsByName.Keys)
+                                    {
+                                        <button class="icon-picker-option" title="@iconName" @onclick="() => SelectSectionIconAsync(section, iconName)">
+                                            <ApplicationIcon IconName="@iconName" Size="20" />
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        </span>
                         <input class="section-title-input" @bind="section.Title" @bind:after="PersistChangesAsync" />
                         <span class="row-controls">
                             <button class="icon-button" title="Раздел выше" disabled="@(sectionIndex == 0)" @onclick="() => MoveSectionAsync(section.Identifier, -1)">↑</button>
@@ -77,12 +181,12 @@
                         <p class="section-hint">@section.Hint</p>
                     }
 
-                    @if (section.Fields.Any(field => field.FieldType == QuestionnaireFieldType.PairedValues))
+                    @if (section.FirstColumnLabel is not null)
                     {
                         <div class="paired-columns-header">
                             <span></span>
-                            <span>@section.FirstColumnLabel</span>
-                            <span>@section.SecondColumnLabel</span>
+                            <input class="column-label-input" title="Название первой колонки — редактируется" @bind="section.FirstColumnLabel" @bind:after="PersistChangesAsync" />
+                            <input class="column-label-input" title="Название второй колонки — редактируется" @bind="section.SecondColumnLabel" @bind:after="PersistChangesAsync" />
                             <span></span>
                         </div>
                     }
@@ -90,9 +194,8 @@
                     @foreach (var (field, fieldIndex) in section.Fields.Select((value, index) => (value, index)))
                     {
                         <div class="@FieldRowCssClass(field)">
-                            <input class="field-label-input" @bind="field.Label" @bind:after="PersistChangesAsync" />
+                            <textarea class="field-label-input" rows="1" @bind="field.Label" @bind:after="PersistChangesAsync"></textarea>
 
-                            @* Все поля многострочные и растут под содержимое *@
                             <textarea class="field-value-textarea" rows="1" @bind="field.PrimaryValue" @bind:after="PersistChangesAsync"></textarea>
                             @if (field.FieldType == QuestionnaireFieldType.PairedValues)
                             {
@@ -111,25 +214,65 @@
                 </section>
             }
 
-            <button class="add-section-button" @onclick="AddSectionAsync">+ Раздел</button>
+            <div class="add-section-row">
+                <button class="add-section-button" @onclick="() => AddSectionAsync(false)">+ Раздел</button>
+                <button class="add-section-button" @onclick="() => AddSectionAsync(true)">+ Раздел с колонками</button>
+            </div>
         }
     </main>
+    }
 </div>
 
 @code {
     private List<CharacterProfile> _allCharacterProfiles = [];
+    private List<CharacterRelationship> _allRelationships = [];
     private CharacterProfile? _selectedCharacterProfile;
     private string _currentThemeName = "light";
+    private string _activeViewName = "questionnaire";
+    private Guid? _iconPickerSectionIdentifier;
 
-    /// <summary>Загружает сохранённых героев и тему при открытии страницы.</summary>
+    private Guid _newRelationshipFirstIdentifier = Guid.Empty;
+    private Guid _newRelationshipSecondIdentifier = Guid.Empty;
+    private string _newRelationshipPresetName = "Дружба";
+    private string _newRelationshipLabel = "Дружба";
+    private string _relationshipFormMessage = string.Empty;
+
+    /// <summary>Предустановленные типы связей и их цвета на графе.</summary>
+    private static readonly IReadOnlyDictionary<string, string> RelationshipPresets = new Dictionary<string, string>
+    {
+        ["Дружба"] = "#3a9d5d",
+        ["Вражда"] = "#c0392b",
+        ["Любовь"] = "#d4628f",
+        ["Семья"] = "#4a78c2",
+        ["Соперничество"] = "#b8772a",
+        ["Другое"] = "#888888"
+    };
+
+    /// <summary>Загружает сохранённых героев, связи и тему при открытии страницы.</summary>
     protected override async Task OnInitializedAsync()
     {
         _allCharacterProfiles = await CharacterProfileRepository.LoadAllProfilesAsync();
+        _allRelationships = await CharacterRelationshipRepository.LoadAllRelationshipsAsync();
         _selectedCharacterProfile = _allCharacterProfiles.FirstOrDefault();
 
         var savedThemeName = await JavascriptRuntime.InvokeAsync<string>("charlaiuInterop.readSavedTheme");
         _currentThemeName = string.IsNullOrWhiteSpace(savedThemeName) ? "light" : savedThemeName;
     }
+
+    private static string DisplayNameOf(CharacterProfile characterProfile) =>
+        string.IsNullOrWhiteSpace(characterProfile.DisplayName) ? "Без имени" : characterProfile.DisplayName;
+
+    private string NameByIdentifier(Guid characterIdentifier) =>
+        _allCharacterProfiles.FirstOrDefault(profile => profile.Identifier == characterIdentifier) is { } foundProfile
+            ? DisplayNameOf(foundProfile)
+            : "?";
+
+    private string ViewSwitchCssClass(string viewName) =>
+        _activeViewName == viewName ? "view-switch-button active" : "view-switch-button";
+
+    /// <summary>Число с точкой для SVG-координат независимо от языка системы.</summary>
+    private static string Fmt(double value) =>
+        value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>CSS-классы строки поля: пустые поля скрываются в печатной версии.</summary>
     private static string FieldRowCssClass(QuestionnaireField field)
@@ -145,14 +288,32 @@
         await CharacterProfileRepository.SaveAllProfilesAsync(_allCharacterProfiles);
     }
 
-    private void SelectCharacterProfile(CharacterProfile characterProfile) =>
+    // ----- Выбор иконки раздела -----
+
+    private void ToggleIconPicker(Guid sectionIdentifier) =>
+        _iconPickerSectionIdentifier = _iconPickerSectionIdentifier == sectionIdentifier ? null : sectionIdentifier;
+
+    private async Task SelectSectionIconAsync(QuestionnaireSection section, string iconName)
+    {
+        section.Icon = iconName;
+        _iconPickerSectionIdentifier = null;
+        await PersistChangesAsync();
+    }
+
+    // ----- Герои -----
+
+    private void SelectCharacterProfile(CharacterProfile characterProfile)
+    {
         _selectedCharacterProfile = characterProfile;
+        _activeViewName = "questionnaire";
+    }
 
     private async Task CreateCharacterProfileAsync()
     {
         var createdProfile = DefaultQuestionnaireSchemaFactory.CreateCharacterProfile();
         _allCharacterProfiles.Add(createdProfile);
         _selectedCharacterProfile = createdProfile;
+        _activeViewName = "questionnaire";
         await PersistChangesAsync();
     }
 
@@ -174,9 +335,17 @@
             "confirm", $"Удалить героя «{_selectedCharacterProfile.DisplayName}» безвозвратно?");
         if (!confirmedByUser) { return; }
 
+        var deletedIdentifier = _selectedCharacterProfile.Identifier;
         _allCharacterProfiles.Remove(_selectedCharacterProfile);
         _selectedCharacterProfile = _allCharacterProfiles.FirstOrDefault();
+
+        // Связи удалённого героя больше не имеют смысла
+        _allRelationships.RemoveAll(relationship =>
+            relationship.FirstCharacterIdentifier == deletedIdentifier ||
+            relationship.SecondCharacterIdentifier == deletedIdentifier);
+
         await PersistChangesAsync();
+        await CharacterRelationshipRepository.SaveAllRelationshipsAsync(_allRelationships);
     }
 
     private async Task OnCharacterNameChangedAsync(ChangeEventArgs changeEventArgs)
@@ -187,9 +356,11 @@
         await PersistChangesAsync();
     }
 
-    private async Task AddSectionAsync()
+    // ----- Разделы и поля -----
+
+    private async Task AddSectionAsync(bool withPairedColumns)
     {
-        _selectedCharacterProfile?.AddSection();
+        _selectedCharacterProfile?.AddSection(withPairedColumns);
         await PersistChangesAsync();
     }
 
@@ -222,6 +393,73 @@
         section.MoveField(fieldIdentifier, positionOffset);
         await PersistChangesAsync();
     }
+
+    // ----- Связи -----
+
+    private void ApplyRelationshipPreset() =>
+        _newRelationshipLabel = _newRelationshipPresetName;
+
+    private IEnumerable<CharacterRelationship> VisibleRelationships()
+    {
+        var existingIdentifiers = _allCharacterProfiles.Select(profile => profile.Identifier).ToHashSet();
+        return _allRelationships.Where(relationship =>
+            existingIdentifiers.Contains(relationship.FirstCharacterIdentifier) &&
+            existingIdentifiers.Contains(relationship.SecondCharacterIdentifier));
+    }
+
+    private async Task AddRelationshipAsync()
+    {
+        if (_newRelationshipFirstIdentifier == Guid.Empty || _newRelationshipSecondIdentifier == Guid.Empty)
+        {
+            _relationshipFormMessage = "Выбери обоих героев.";
+            return;
+        }
+
+        if (_newRelationshipFirstIdentifier == _newRelationshipSecondIdentifier)
+        {
+            _relationshipFormMessage = "Героя нельзя связать с самим собой.";
+            return;
+        }
+
+        _allRelationships.Add(new CharacterRelationship
+        {
+            FirstCharacterIdentifier = _newRelationshipFirstIdentifier,
+            SecondCharacterIdentifier = _newRelationshipSecondIdentifier,
+            Label = string.IsNullOrWhiteSpace(_newRelationshipLabel) ? _newRelationshipPresetName : _newRelationshipLabel.Trim(),
+            ColorHex = RelationshipPresets.GetValueOrDefault(_newRelationshipPresetName, "#888888")
+        });
+
+        _relationshipFormMessage = string.Empty;
+        await CharacterRelationshipRepository.SaveAllRelationshipsAsync(_allRelationships);
+    }
+
+    private async Task DeleteRelationshipAsync(Guid relationshipIdentifier)
+    {
+        _allRelationships.RemoveAll(relationship => relationship.Identifier == relationshipIdentifier);
+        await CharacterRelationshipRepository.SaveAllRelationshipsAsync(_allRelationships);
+    }
+
+    /// <summary>Раскладывает героев по кругу — простой и предсказуемый макет графа.</summary>
+    private IReadOnlyList<(CharacterProfile Profile, double X, double Y)> CalculateGraphNodes()
+    {
+        const double centerX = 400;
+        const double centerY = 240;
+        const double layoutRadius = 175;
+
+        var profilesTotal = _allCharacterProfiles.Count;
+
+        return _allCharacterProfiles
+            .Select((profile, profileIndex) =>
+            {
+                var angleRadians = 2 * Math.PI * profileIndex / profilesTotal - Math.PI / 2;
+                return (profile,
+                    centerX + layoutRadius * Math.Cos(angleRadians),
+                    centerY + layoutRadius * Math.Sin(angleRadians));
+            })
+            .ToList();
+    }
+
+    // ----- Тема, печать, экспорт, импорт -----
 
     private async Task ToggleThemeAsync()
     {

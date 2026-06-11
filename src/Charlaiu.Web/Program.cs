@@ -11,6 +11,7 @@ webAssemblyHostBuilder.RootComponents.Add<HeadOutlet>("head::after");
 // Хранилище и экспортёры зарегистрированы интерфейсами —
 // реализацию можно заменить, не трогая компоненты
 webAssemblyHostBuilder.Services.AddScoped<ICharacterProfileRepository, BrowserLocalStorageCharacterProfileRepository>();
+webAssemblyHostBuilder.Services.AddScoped<ICharacterRelationshipRepository, BrowserLocalStorageCharacterRelationshipRepository>();
 webAssemblyHostBuilder.Services.AddScoped<MarkdownQuestionnaireExporter>();
 webAssemblyHostBuilder.Services.AddScoped<JsonQuestionnaireExporter>();
 webAssemblyHostBuilder.Services.AddScoped<BrowserFileDownloadService>();

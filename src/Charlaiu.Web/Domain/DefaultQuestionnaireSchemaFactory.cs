@@ -24,7 +24,7 @@ public static class DefaultQuestionnaireSchemaFactory
         [
             new QuestionnaireSection
             {
-                Icon = "⚓", Title = "Карточка",
+                Icon = "description", Title = "Карточка",
                 Fields =
                 [
                     SingleLineField("Имя"),
@@ -37,7 +37,7 @@ public static class DefaultQuestionnaireSchemaFactory
             },
             new QuestionnaireSection
             {
-                Icon = "👤", Title = "Внешность",
+                Icon = "person", Title = "Внешность",
                 Hint = "Одна деталь работает лучше десяти. У Мири — голубая лента. Что у этого героя?",
                 Fields =
                 [
@@ -50,7 +50,7 @@ public static class DefaultQuestionnaireSchemaFactory
             },
             new QuestionnaireSection
             {
-                Icon = "🎭", Title = "Характер",
+                Icon = "mood", Title = "Характер",
                 Hint = "Противоречие — сердце героя. Лури любит сестру, но не умеет это показать. А этот?",
                 Fields =
                 [
@@ -65,7 +65,7 @@ public static class DefaultQuestionnaireSchemaFactory
             },
             new QuestionnaireSection
             {
-                Icon = "💭", Title = "Мечты и страхи",
+                Icon = "cloud", Title = "Мечты и страхи",
                 Fields =
                 [
                     MultiLineField("Большая мечта (о которой молчит)"),
@@ -77,7 +77,7 @@ public static class DefaultQuestionnaireSchemaFactory
             },
             new QuestionnaireSection
             {
-                Icon = "❤️", Title = "Любит / Не любит",
+                Icon = "favorite", Title = "Любит / Не любит",
                 FirstColumnLabel = "Любит", SecondColumnLabel = "Не любит",
                 Fields =
                 [
@@ -90,7 +90,7 @@ public static class DefaultQuestionnaireSchemaFactory
             },
             new QuestionnaireSection
             {
-                Icon = "🗳", Title = "Взгляды и мир",
+                Icon = "public", Title = "Взгляды и мир",
                 Hint = "В нашем мире отношение к морю — это отношение к судьбе. Море кормит и забирает.",
                 Fields =
                 [
@@ -103,7 +103,7 @@ public static class DefaultQuestionnaireSchemaFactory
             },
             new QuestionnaireSection
             {
-                Icon = "🗣", Title = "Речь",
+                Icon = "mic", Title = "Речь",
                 Fields =
                 [
                     SingleLineField("Темп и громкость"),
@@ -114,7 +114,7 @@ public static class DefaultQuestionnaireSchemaFactory
             },
             new QuestionnaireSection
             {
-                Icon = "👥", Title = "Связи",
+                Icon = "group", Title = "Связи",
                 Fields =
                 [
                     MultiLineField("Семья"),
@@ -128,7 +128,7 @@ public static class DefaultQuestionnaireSchemaFactory
             },
             new QuestionnaireSection
             {
-                Icon = "🎬", Title = "Роль в истории",
+                Icon = "flag", Title = "Роль в истории",
                 Hint = "«Хочет» и «нужно» — разные вещи. Лури хочет найти родителей. Нужно ей — вернуть сестру.",
                 Fields =
                 [
@@ -142,7 +142,7 @@ public static class DefaultQuestionnaireSchemaFactory
             },
             new QuestionnaireSection
             {
-                Icon = "🌊", Title = "Пять вопросов на глубину",
+                Icon = "sailing", Title = "Пять вопросов на глубину",
                 Fields =
                 [
                     MultiLineField("Что он делает, когда никто не видит?"),
@@ -154,7 +154,7 @@ public static class DefaultQuestionnaireSchemaFactory
             },
             new QuestionnaireSection
             {
-                Icon = "📝", Title = "Заметки",
+                Icon = "notes", Title = "Заметки",
                 Fields = [MultiLineField("Всё, что не влезло выше")]
             }
         ]
