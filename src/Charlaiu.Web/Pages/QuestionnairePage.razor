@@ -1,0 +1,254 @@
+@page "/"
+@inject ICharacterProfileRepository CharacterProfileRepository
+@inject MarkdownQuestionnaireExporter MarkdownExporter
+@inject JsonQuestionnaireExporter JsonExporter
+@inject BrowserFileDownloadService FileDownloadService
+@inject IJSRuntime JavascriptRuntime
+
+<PageTitle>Где он лёг — анкета персонажа</PageTitle>
+
+<div class="application-layout">
+    <aside class="characters-sidebar">
+        <header class="sidebar-header">
+            <h1 class="application-title">Где он лёг</h1>
+            <button class="theme-toggle-button" title="Переключить тему" @onclick="ToggleThemeAsync">@(_currentThemeName == "dark" ? "☀" : "🌙")</button>
+        </header>
+
+        <ul class="characters-list">
+            @foreach (var characterProfile in _allCharacterProfiles)
+            {
+                <li class="@(characterProfile.Identifier == _selectedCharacterProfile?.Identifier ? "character-item selected" : "character-item")">
+                    <button class="character-select-button" @onclick="() => SelectCharacterProfile(characterProfile)">
+                        @(string.IsNullOrWhiteSpace(characterProfile.DisplayName) ? "Без имени" : characterProfile.DisplayName)
+                    </button>
+                </li>
+            }
+        </ul>
+
+        <div class="sidebar-actions">
+            <button class="primary-button" @onclick="CreateCharacterProfileAsync">+ Новый герой</button>
+            @if (_selectedCharacterProfile is not null)
+            {
+                <button class="secondary-button" @onclick="DuplicateSelectedCharacterProfileAsync">Дублировать</button>
+                <button class="danger-button" @onclick="DeleteSelectedCharacterProfileAsync">Удалить</button>
+            }
+        </div>
+
+        <div class="sidebar-actions">
+            <button class="secondary-button" @onclick="ExportSelectedProfileAsMarkdownAsync" disabled="@(_selectedCharacterProfile is null)">Экспорт Markdown</button>
+            <button class="secondary-button" @onclick="ExportSelectedProfileAsJsonAsync" disabled="@(_selectedCharacterProfile is null)">Экспорт JSON</button>
+            <label class="secondary-button import-label">
+                Импорт JSON
+                <InputFile OnChange="ImportProfileFromJsonAsync" accept=".json" class="hidden-file-input" />
+            </label>
+        </div>
+    </aside>
+
+    <main class="questionnaire-editor">
+        @if (_selectedCharacterProfile is null)
+        {
+            <p class="empty-state-message">Создай первого героя кнопкой «Новый герой».</p>
+        }
+        else
+        {
+            <input class="character-name-input"
+                   value="@_selectedCharacterProfile.DisplayName"
+                   placeholder="Имя героя"
+                   @oninput="OnCharacterNameChangedAsync" />
+
+            @foreach (var section in _selectedCharacterProfile.Sections)
+            {
+                <section class="questionnaire-section">
+                    <header class="section-header">
+                        <span class="section-icon">@section.Icon</span>
+                        <input class="section-title-input" @bind="section.Title" @bind:after="PersistChangesAsync" />
+                        <button class="icon-button" title="Удалить раздел" @onclick="() => RemoveSectionAsync(section.Identifier)">✕</button>
+                    </header>
+
+                    @if (!string.IsNullOrWhiteSpace(section.Hint))
+                    {
+                        <p class="section-hint">@section.Hint</p>
+                    }
+
+                    @if (section.Fields.Any(field => field.FieldType == QuestionnaireFieldType.PairedValues))
+                    {
+                        <div class="paired-columns-header">
+                            <span></span>
+                            <span>@section.FirstColumnLabel</span>
+                            <span>@section.SecondColumnLabel</span>
+                            <span></span>
+                        </div>
+                    }
+
+                    @foreach (var field in section.Fields)
+                    {
+                        <div class="@(field.FieldType == QuestionnaireFieldType.PairedValues ? "field-row paired" : "field-row")">
+                            <input class="field-label-input" @bind="field.Label" @bind:after="PersistChangesAsync" />
+
+                            @if (field.FieldType == QuestionnaireFieldType.PairedValues)
+                            {
+                                <input class="field-value-input" @bind="field.PrimaryValue" @bind:after="PersistChangesAsync" />
+                                <input class="field-value-input" @bind="field.SecondaryValue" @bind:after="PersistChangesAsync" />
+                            }
+                            else if (field.FieldType == QuestionnaireFieldType.MultiLine)
+                            {
+                                <textarea class="field-value-textarea" @bind="field.PrimaryValue" @bind:after="PersistChangesAsync"></textarea>
+                            }
+                            else
+                            {
+                                <input class="field-value-input" @bind="field.PrimaryValue" @bind:after="PersistChangesAsync" />
+                            }
+
+                            <button class="icon-button" title="Удалить поле" @onclick="() => RemoveFieldAsync(section, field.Identifier)">✕</button>
+                        </div>
+                    }
+
+                    <button class="add-field-button" @onclick="() => AddFieldAsync(section)">+ Поле</button>
+                </section>
+            }
+
+            <button class="add-section-button" @onclick="AddSectionAsync">+ Раздел</button>
+        }
+    </main>
+</div>
+
+@code {
+    private List<CharacterProfile> _allCharacterProfiles = [];
+    private CharacterProfile? _selectedCharacterProfile;
+    private string _currentThemeName = "light";
+
+    /// <summary>Загружает сохранённых героев и тему при открытии страницы.</summary>
+    protected override async Task OnInitializedAsync()
+    {
+        _allCharacterProfiles = await CharacterProfileRepository.LoadAllProfilesAsync();
+        _selectedCharacterProfile = _allCharacterProfiles.FirstOrDefault();
+
+        var savedThemeName = await JavascriptRuntime.InvokeAsync<string>("charlaiuInterop.readSavedTheme");
+        _currentThemeName = string.IsNullOrWhiteSpace(savedThemeName) ? "light" : savedThemeName;
+    }
+
+    /// <summary>Сохраняет всех героев и отмечает выбранного изменённым.</summary>
+    private async Task PersistChangesAsync()
+    {
+        _selectedCharacterProfile?.MarkAsUpdated();
+        await CharacterProfileRepository.SaveAllProfilesAsync(_allCharacterProfiles);
+    }
+
+    private void SelectCharacterProfile(CharacterProfile characterProfile) =>
+        _selectedCharacterProfile = characterProfile;
+
+    private async Task CreateCharacterProfileAsync()
+    {
+        var createdProfile = DefaultQuestionnaireSchemaFactory.CreateCharacterProfile();
+        _allCharacterProfiles.Add(createdProfile);
+        _selectedCharacterProfile = createdProfile;
+        await PersistChangesAsync();
+    }
+
+    private async Task DuplicateSelectedCharacterProfileAsync()
+    {
+        if (_selectedCharacterProfile is null) { return; }
+
+        var duplicatedProfile = _selectedCharacterProfile.Clone();
+        _allCharacterProfiles.Add(duplicatedProfile);
+        _selectedCharacterProfile = duplicatedProfile;
+        await PersistChangesAsync();
+    }
+
+    private async Task DeleteSelectedCharacterProfileAsync()
+    {
+        if (_selectedCharacterProfile is null) { return; }
+
+        var confirmedByUser = await JavascriptRuntime.InvokeAsync<bool>(
+            "confirm", $"Удалить героя «{_selectedCharacterProfile.DisplayName}» безвозвратно?");
+        if (!confirmedByUser) { return; }
+
+        _allCharacterProfiles.Remove(_selectedCharacterProfile);
+        _selectedCharacterProfile = _allCharacterProfiles.FirstOrDefault();
+        await PersistChangesAsync();
+    }
+
+    private async Task OnCharacterNameChangedAsync(ChangeEventArgs changeEventArgs)
+    {
+        if (_selectedCharacterProfile is null) { return; }
+
+        _selectedCharacterProfile.DisplayName = changeEventArgs.Value?.ToString() ?? string.Empty;
+        await PersistChangesAsync();
+    }
+
+    private async Task AddSectionAsync()
+    {
+        _selectedCharacterProfile?.AddSection();
+        await PersistChangesAsync();
+    }
+
+    private async Task RemoveSectionAsync(Guid sectionIdentifier)
+    {
+        _selectedCharacterProfile?.RemoveSection(sectionIdentifier);
+        await PersistChangesAsync();
+    }
+
+    private async Task AddFieldAsync(QuestionnaireSection section)
+    {
+        section.AddField();
+        await PersistChangesAsync();
+    }
+
+    private async Task RemoveFieldAsync(QuestionnaireSection section, Guid fieldIdentifier)
+    {
+        section.RemoveField(fieldIdentifier);
+        await PersistChangesAsync();
+    }
+
+    private async Task ToggleThemeAsync()
+    {
+        _currentThemeName = _currentThemeName == "dark" ? "light" : "dark";
+        await JavascriptRuntime.InvokeVoidAsync("charlaiuInterop.applyTheme", _currentThemeName);
+    }
+
+    private async Task ExportSelectedProfileAsMarkdownAsync() =>
+        await ExportSelectedProfileAsync(MarkdownExporter);
+
+    private async Task ExportSelectedProfileAsJsonAsync() =>
+        await ExportSelectedProfileAsync(JsonExporter);
+
+    /// <summary>Единый сценарий экспорта: формат определяется переданным экспортёром.</summary>
+    private async Task ExportSelectedProfileAsync(IQuestionnaireExporter questionnaireExporter)
+    {
+        if (_selectedCharacterProfile is null) { return; }
+
+        var safeFileName = string.IsNullOrWhiteSpace(_selectedCharacterProfile.DisplayName)
+            ? "герой"
+            : _selectedCharacterProfile.DisplayName.Trim();
+
+        await FileDownloadService.DownloadTextFileAsync(
+            $"{safeFileName}.{questionnaireExporter.FileExtension}",
+            questionnaireExporter.ContentType,
+            questionnaireExporter.Export(_selectedCharacterProfile));
+    }
+
+    private async Task ImportProfileFromJsonAsync(InputFileChangeEventArgs fileChangeEventArgs)
+    {
+        const long maximumImportFileSizeBytes = 5 * 1024 * 1024;
+
+        using var importStreamReader = new StreamReader(
+            fileChangeEventArgs.File.OpenReadStream(maximumImportFileSizeBytes));
+        var importedJson = await importStreamReader.ReadToEndAsync();
+
+        try
+        {
+            var importedProfile = System.Text.Json.JsonSerializer.Deserialize<CharacterProfile>(importedJson);
+            if (importedProfile is null) { return; }
+
+            // Новый идентификатор защищает от конфликта с уже существующим героем
+            importedProfile.Identifier = Guid.CreateVersion7();
+            _allCharacterProfiles.Add(importedProfile);
+            _selectedCharacterProfile = importedProfile;
+            await PersistChangesAsync();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            await JavascriptRuntime.InvokeVoidAsync("alert", "Файл не похож на анкету героя — импорт отменён.");
+        }
+    }
+}

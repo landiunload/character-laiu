@@ -1,0 +1,140 @@
+/* Палитра: светлая тема по умолчанию, тёмная — через data-theme="dark" */
+:root {
+  --background-color: #faf7f2;
+  --surface-color: #ffffff;
+  --text-color: #2b2a27;
+  --muted-text-color: #8a857c;
+  --border-color: #e3ddd2;
+  --accent-color: #2f6f6a;
+  --accent-text-color: #ffffff;
+  --danger-color: #b3402f;
+}
+
+:root[data-theme="dark"] {
+  --background-color: #1e1d1b;
+  --surface-color: #282623;
+  --text-color: #e8e4dc;
+  --muted-text-color: #97917f;
+  --border-color: #3b382f;
+  --accent-color: #5fa8a0;
+  --accent-text-color: #14211f;
+  --danger-color: #d97862;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  background: var(--background-color);
+  color: var(--text-color);
+}
+
+.loading-placeholder { padding: 3rem; text-align: center; color: var(--muted-text-color); }
+
+.application-layout { display: flex; min-height: 100vh; }
+
+/* Боковая панель со списком героев */
+.characters-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  padding: 1rem;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.sidebar-header { display: flex; align-items: center; justify-content: space-between; }
+.application-title { font-size: 1.25rem; margin: 0; }
+.theme-toggle-button { background: none; border: none; font-size: 1.1rem; cursor: pointer; }
+
+.characters-list { list-style: none; margin: 0; padding: 0; flex: 1; overflow-y: auto; }
+.character-item { margin-bottom: 4px; }
+.character-select-button {
+  width: 100%; text-align: left; padding: 8px 10px;
+  background: none; border: 1px solid transparent; border-radius: 8px;
+  color: var(--text-color); font: inherit; cursor: pointer;
+}
+.character-item.selected .character-select-button {
+  background: var(--surface-color); border-color: var(--border-color); font-weight: bold;
+}
+
+.sidebar-actions { display: flex; flex-direction: column; gap: 6px; }
+
+.primary-button, .secondary-button, .danger-button {
+  padding: 8px 10px; border-radius: 8px; font: inherit; cursor: pointer; text-align: center;
+}
+.primary-button { background: var(--accent-color); color: var(--accent-text-color); border: none; }
+.secondary-button { background: var(--surface-color); color: var(--text-color); border: 1px solid var(--border-color); }
+.secondary-button:disabled { opacity: 0.45; cursor: default; }
+.danger-button { background: none; color: var(--danger-color); border: 1px solid var(--danger-color); }
+
+.import-label { display: block; cursor: pointer; }
+.hidden-file-input { display: none; }
+
+/* Редактор анкеты */
+.questionnaire-editor { flex: 1; max-width: 860px; padding: 1.5rem 2rem; }
+.empty-state-message { color: var(--muted-text-color); }
+
+.character-name-input {
+  width: 100%; font: inherit; font-size: 1.6rem; font-weight: bold;
+  background: none; border: none; border-bottom: 2px solid var(--border-color);
+  color: var(--text-color); padding: 6px 2px; margin-bottom: 1.25rem; outline: none;
+}
+
+.questionnaire-section {
+  background: var(--surface-color); border: 1px solid var(--border-color);
+  border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1rem;
+}
+
+.section-header { display: flex; align-items: center; gap: 8px; }
+.section-icon { font-size: 1.1rem; }
+.section-title-input {
+  flex: 1; font: inherit; font-size: 1.1rem; font-weight: bold;
+  background: none; border: none; color: var(--text-color); outline: none;
+}
+.section-hint { color: var(--muted-text-color); font-style: italic; font-size: 0.9rem; margin: 6px 0 10px; }
+
+.paired-columns-header {
+  display: grid; grid-template-columns: 160px 1fr 1fr 28px; gap: 8px;
+  color: var(--muted-text-color); font-size: 0.85rem; margin-top: 10px;
+}
+
+.field-row { display: grid; grid-template-columns: 160px 1fr 28px; gap: 8px; align-items: start; margin-top: 8px; }
+.field-row.paired { grid-template-columns: 160px 1fr 1fr 28px; }
+
+.field-label-input {
+  font: inherit; font-size: 0.9rem; color: var(--muted-text-color);
+  background: none; border: none; outline: none; padding-top: 8px;
+}
+
+.field-value-input, .field-value-textarea {
+  font: inherit; width: 100%; padding: 7px 9px;
+  background: var(--background-color); color: var(--text-color);
+  border: 1px solid var(--border-color); border-radius: 8px; outline: none;
+}
+.field-value-textarea { min-height: 64px; resize: vertical; }
+.field-value-input:focus, .field-value-textarea:focus { border-color: var(--accent-color); }
+
+.icon-button {
+  background: none; border: none; color: var(--muted-text-color);
+  cursor: pointer; padding-top: 8px;
+}
+.icon-button:hover { color: var(--danger-color); }
+
+.add-field-button, .add-section-button {
+  margin-top: 10px; background: none; border: 1px dashed var(--border-color);
+  border-radius: 8px; color: var(--muted-text-color); font: inherit;
+  padding: 7px 12px; cursor: pointer;
+}
+.add-section-button { width: 100%; padding: 12px; }
+.add-field-button:hover, .add-section-button:hover { color: var(--accent-color); border-color: var(--accent-color); }
+
+/* Телефон: панель сверху, анкета под ней */
+@media (max-width: 720px) {
+  .application-layout { flex-direction: column; }
+  .characters-sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border-color); }
+  .questionnaire-editor { padding: 1rem; }
+  .field-row, .field-row.paired, .paired-columns-header { grid-template-columns: 1fr; }
+}
