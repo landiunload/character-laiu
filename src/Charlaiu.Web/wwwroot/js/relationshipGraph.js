@@ -7,13 +7,16 @@ window.charlaiuGraph = (() => {
   const NODE_RADIUS = 30;
   const GOLDEN_ANGLE_RADIANS = 2.399963;
 
-  // Физические константы — те же, что были в C#-версии
-  const REPULSION_STRENGTH = 80000;
-  const SPRING_REST_LENGTH = 235;
-  const SPRING_STIFFNESS = 0.025;
-  const CENTERING_STRENGTH = 0.012;
-  const VELOCITY_DAMPING = 0.80;
+  // Физические константы
+  const REPULSION_STRENGTH = 80000;        // отталкивание узлов друг от друга
+  const SPRING_REST_LENGTH = 235;          // желаемая длина связи
+  const SPRING_STIFFNESS = 0.025;          // жёсткость пружины-связи
+  const CENTERING_STRENGTH = 0.012;        // притяжение к центру холста
+  const VELOCITY_DAMPING = 0.80;           // затухание скоростей
+  const EDGE_NODE_REPULSION = 26000;       // отталкивание узлов от чужих линий связи
+  const EDGE_NODE_RANGE = 70;              // дальше этого расстояния линия на узел не давит
   const SLEEP_VELOCITY_THRESHOLD = 0.02;
+  const HOVER_ANIMATION_SPEED = 0.22;      // скорость анимаций наведения (доля пути за кадр)
 
   let canvasElement = null;
   let renderingContext = null;
@@ -21,12 +24,15 @@ window.charlaiuGraph = (() => {
   let animationFrameHandle = 0;
   let resizeObserver = null;
 
-  /** id → {x, y, vx, vy, label, filtered, pinned} */
+  /** id → {x, y, vx, vy, label, filtered, pinned, scale, targetScale} */
   const nodesById = new Map();
+  /** [{id, a, b, label, color, oneWay, hoverT, geometry}] — порядок задаёт раскладку дуг */
   let edges = [];
   let spawnedNodesCounter = 0;
 
   let draggedNodeId = null;
+  let hoveredNodeId = null;
+  let hoveredEdgeId = null;
   let pointerWasDragged = false;
   let simulationIsAsleep = false;
 
@@ -55,14 +61,88 @@ window.charlaiuGraph = (() => {
     for (const [nodeId, node] of nodesById) {
       const deltaX = worldPoint.x - node.x;
       const deltaY = worldPoint.y - node.y;
-      if (deltaX * deltaX + deltaY * deltaY <= NODE_RADIUS * NODE_RADIUS) {
+      const hitRadius = NODE_RADIUS * (node.scale || 1);
+      if (deltaX * deltaX + deltaY * deltaY <= hitRadius * hitRadius) {
         foundNodeId = nodeId; // последний в порядке отрисовки — визуально верхний
       }
     }
     return foundNodeId;
   }
 
+  /** Точка квадратичной кривой Безье при параметре t. */
+  function quadraticPoint(geometry, t) {
+    const inverseT = 1 - t;
+    return {
+      x: inverseT * inverseT * geometry.sourceX + 2 * inverseT * t * geometry.controlX + t * t * geometry.targetX,
+      y: inverseT * inverseT * geometry.sourceY + 2 * inverseT * t * geometry.controlY + t * t * geometry.targetY
+    };
+  }
+
+  /** Поиск связи под курсором: расстояние до выборки точек кривой. */
+  function findEdgeAt(worldPoint) {
+    const hitDistanceSquared = 9 * 9;
+    let foundEdgeId = null;
+
+    for (const edge of edges) {
+      if (!edge.geometry) { continue; }
+      for (let sampleIndex = 1; sampleIndex < 16; sampleIndex++) {
+        const curvePoint = quadraticPoint(edge.geometry, sampleIndex / 16);
+        const deltaX = worldPoint.x - curvePoint.x;
+        const deltaY = worldPoint.y - curvePoint.y;
+        if (deltaX * deltaX + deltaY * deltaY <= hitDistanceSquared) {
+          foundEdgeId = edge.id;
+          break;
+        }
+      }
+    }
+    return foundEdgeId;
+  }
+
   function wakeSimulation() { simulationIsAsleep = false; }
+
+  // ----- Геометрия рёбер (общая для физики, отрисовки и попадания курсора) -----
+
+  /**
+   * Считает контрольные точки дуг: параллельные связи одной пары расходятся
+   * в обе стороны от канонической нормали пары. Порядок связей в списке
+   * определяет, какая дуга окажется ближе к прямой.
+   */
+  function computeEdgeGeometries() {
+    const edgesByPairKey = new Map();
+    for (const edge of edges) {
+      edge.geometry = null;
+      if (!nodesById.has(edge.a) || !nodesById.has(edge.b)) { continue; }
+      const pairKey = edge.a < edge.b ? edge.a + "|" + edge.b : edge.b + "|" + edge.a;
+      if (!edgesByPairKey.has(pairKey)) { edgesByPairKey.set(pairKey, []); }
+      edgesByPairKey.get(pairKey).push(edge);
+    }
+
+    for (const [pairKey, parallelEdges] of edgesByPairKey) {
+      const [canonicalFirstId, canonicalSecondId] = pairKey.split("|");
+      const canonicalFirstNode = nodesById.get(canonicalFirstId);
+      const canonicalSecondNode = nodesById.get(canonicalSecondId);
+
+      const canonicalDeltaX = canonicalSecondNode.x - canonicalFirstNode.x;
+      const canonicalDeltaY = canonicalSecondNode.y - canonicalFirstNode.y;
+      const canonicalDistance = Math.max(Math.hypot(canonicalDeltaX, canonicalDeltaY), 1);
+      const normalX = -canonicalDeltaY / canonicalDistance;
+      const normalY = canonicalDeltaX / canonicalDistance;
+
+      for (let parallelIndex = 0; parallelIndex < parallelEdges.length; parallelIndex++) {
+        const edge = parallelEdges[parallelIndex];
+        const sourceNode = nodesById.get(edge.a);
+        const targetNode = nodesById.get(edge.b);
+
+        const arcOffset = (parallelIndex - (parallelEdges.length - 1) / 2.0) * 62;
+        edge.geometry = {
+          sourceX: sourceNode.x, sourceY: sourceNode.y,
+          targetX: targetNode.x, targetY: targetNode.y,
+          controlX: (sourceNode.x + targetNode.x) / 2 + normalX * arcOffset * 2,
+          controlY: (sourceNode.y + targetNode.y) / 2 + normalY * arcOffset * 2
+        };
+      }
+    }
+  }
 
   // ----- Физика -----
 
@@ -110,6 +190,37 @@ window.charlaiuGraph = (() => {
       targetNode.vx -= forceX; targetNode.vy -= forceY;
     }
 
+    // Узлы отталкиваются от чужих линий связи — линии не ложатся на персонажей
+    computeEdgeGeometries();
+    for (const edge of edges) {
+      if (!edge.geometry) { continue; }
+      for (const [nodeId, node] of nodesById) {
+        if (nodeId === edge.a || nodeId === edge.b) { continue; }
+
+        // Ближайшая из выборки точек кривой
+        let nearestDeltaX = 0, nearestDeltaY = 0;
+        let nearestDistanceSquared = Infinity;
+        for (let sampleIndex = 1; sampleIndex < 8; sampleIndex++) {
+          const curvePoint = quadraticPoint(edge.geometry, sampleIndex / 8);
+          const deltaX = node.x - curvePoint.x;
+          const deltaY = node.y - curvePoint.y;
+          const distanceSquared = deltaX * deltaX + deltaY * deltaY;
+          if (distanceSquared < nearestDistanceSquared) {
+            nearestDistanceSquared = distanceSquared;
+            nearestDeltaX = deltaX;
+            nearestDeltaY = deltaY;
+          }
+        }
+
+        const distance = Math.sqrt(Math.max(nearestDistanceSquared, 100));
+        if (distance >= EDGE_NODE_RANGE) { continue; }
+
+        const pushForce = EDGE_NODE_REPULSION / (distance * distance);
+        node.vx += pushForce * nearestDeltaX / distance;
+        node.vy += pushForce * nearestDeltaY / distance;
+      }
+    }
+
     let totalKineticEnergy = 0;
     for (const node of nodesById.values()) {
       if (node.pinned) { node.vx = 0; node.vy = 0; continue; }
@@ -124,8 +235,21 @@ window.charlaiuGraph = (() => {
       totalKineticEnergy += node.vx * node.vx + node.vy * node.vy;
     }
 
+    // Плавные анимации наведения и перетаскивания
+    let animationsAreSettled = true;
+    for (const [nodeId, node] of nodesById) {
+      node.targetScale = nodeId === draggedNodeId ? 1.18 : nodeId === hoveredNodeId ? 1.1 : 1;
+      node.scale += (node.targetScale - node.scale) * HOVER_ANIMATION_SPEED;
+      if (Math.abs(node.targetScale - node.scale) > 0.004) { animationsAreSettled = false; }
+    }
+    for (const edge of edges) {
+      const targetHover = edge.id === hoveredEdgeId ? 1 : 0;
+      edge.hoverT += (targetHover - edge.hoverT) * HOVER_ANIMATION_SPEED;
+      if (Math.abs(targetHover - edge.hoverT) > 0.02) { animationsAreSettled = false; }
+    }
+
     // Уснувший граф не считается и не перерисовывается — ноль нагрузки в покое
-    if (totalKineticEnergy < SLEEP_VELOCITY_THRESHOLD && draggedNodeId === null) {
+    if (totalKineticEnergy < SLEEP_VELOCITY_THRESHOLD && draggedNodeId === null && animationsAreSettled) {
       simulationIsAsleep = true;
     }
   }
@@ -145,97 +269,135 @@ window.charlaiuGraph = (() => {
     renderingContext.fillText(text, x, y);
   }
 
-  function drawFrame() {
-    const theme = readThemeColors();
-    renderingContext.clearRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-
-    // Рёбра: параллельные связи одной пары расходятся дугами от канонической нормали пары
-    const edgesByPairKey = new Map();
-    for (const edge of edges) {
-      if (!nodesById.has(edge.a) || !nodesById.has(edge.b)) { continue; }
-      const pairKey = edge.a < edge.b ? edge.a + "|" + edge.b : edge.b + "|" + edge.a;
-      if (!edgesByPairKey.has(pairKey)) { edgesByPairKey.set(pairKey, []); }
-      edgesByPairKey.get(pairKey).push(edge);
+  /**
+   * Раскладка подписей без наложений: подписи связей отталкиваются друг от друга
+   * и от подписей персонажей (те остаются на месте) за несколько итераций релаксации.
+   */
+  function relaxLabelPositions(labels) {
+    renderingContext.textAlign = "center";
+    for (const label of labels) {
+      renderingContext.font = label.font;
+      label.halfWidth = renderingContext.measureText(label.text).width / 2 + 4;
+      label.halfHeight = 9;
     }
 
-    const labelDrawQueue = [];
+    for (let iteration = 0; iteration < 6; iteration++) {
+      for (let firstIndex = 0; firstIndex < labels.length; firstIndex++) {
+        for (let secondIndex = firstIndex + 1; secondIndex < labels.length; secondIndex++) {
+          const firstLabel = labels[firstIndex];
+          const secondLabel = labels[secondIndex];
 
-    for (const [pairKey, parallelEdges] of edgesByPairKey) {
-      const [canonicalFirstId, canonicalSecondId] = pairKey.split("|");
-      const canonicalFirstNode = nodesById.get(canonicalFirstId);
-      const canonicalSecondNode = nodesById.get(canonicalSecondId);
+          const overlapX = firstLabel.halfWidth + secondLabel.halfWidth - Math.abs(firstLabel.x - secondLabel.x);
+          const overlapY = firstLabel.halfHeight + secondLabel.halfHeight - Math.abs(firstLabel.y - secondLabel.y);
+          if (overlapX <= 0 || overlapY <= 0) { continue; }
+          if (firstLabel.fixed && secondLabel.fixed) { continue; }
 
-      const canonicalDeltaX = canonicalSecondNode.x - canonicalFirstNode.x;
-      const canonicalDeltaY = canonicalSecondNode.y - canonicalFirstNode.y;
-      const canonicalDistance = Math.max(Math.hypot(canonicalDeltaX, canonicalDeltaY), 1);
-      const normalX = -canonicalDeltaY / canonicalDistance;
-      const normalY = canonicalDeltaX / canonicalDistance;
+          // Раздвигаются по вертикали — самое естественное направление для строк текста
+          const pushDirection = firstLabel.y <= secondLabel.y ? -1 : 1;
+          const pushAmount = (overlapY / 2) + 1;
 
-      for (let parallelIndex = 0; parallelIndex < parallelEdges.length; parallelIndex++) {
-        const edge = parallelEdges[parallelIndex];
-        const sourceNode = nodesById.get(edge.a);
-        const targetNode = nodesById.get(edge.b);
-
-        const arcOffset = (parallelIndex - (parallelEdges.length - 1) / 2.0) * 62;
-        const controlX = (sourceNode.x + targetNode.x) / 2 + normalX * arcOffset * 2;
-        const controlY = (sourceNode.y + targetNode.y) / 2 + normalY * arcOffset * 2;
-
-        renderingContext.beginPath();
-        renderingContext.moveTo(sourceNode.x, sourceNode.y);
-        renderingContext.quadraticCurveTo(controlX, controlY, targetNode.x, targetNode.y);
-        renderingContext.strokeStyle = edge.color;
-        renderingContext.lineWidth = 2.5;
-        renderingContext.stroke();
-
-        if (edge.oneWay) {
-          const tangentX = targetNode.x - controlX;
-          const tangentY = targetNode.y - controlY;
-          const tangentLength = Math.max(Math.hypot(tangentX, tangentY), 1);
-          const unitX = tangentX / tangentLength;
-          const unitY = tangentY / tangentLength;
-          const tipX = targetNode.x - unitX * 33;
-          const tipY = targetNode.y - unitY * 33;
-          const baseX = tipX - unitX * 12;
-          const baseY = tipY - unitY * 12;
-          const sideX = -unitY * 6;
-          const sideY = unitX * 6;
-
-          renderingContext.beginPath();
-          renderingContext.moveTo(tipX, tipY);
-          renderingContext.lineTo(baseX + sideX, baseY + sideY);
-          renderingContext.lineTo(baseX - sideX, baseY - sideY);
-          renderingContext.closePath();
-          renderingContext.fillStyle = edge.color;
-          renderingContext.fill();
+          if (firstLabel.fixed) {
+            secondLabel.y -= pushDirection * pushAmount * 2;
+          } else if (secondLabel.fixed) {
+            firstLabel.y += pushDirection * pushAmount * 2;
+          } else {
+            firstLabel.y += pushDirection * pushAmount;
+            secondLabel.y -= pushDirection * pushAmount;
+          }
         }
-
-        // Подписи рисуются после всех линий, чтобы подложка перекрывала их
-        labelDrawQueue.push({
-          text: edge.label,
-          x: 0.25 * sourceNode.x + 0.5 * controlX + 0.25 * targetNode.x,
-          y: 0.25 * sourceNode.y + 0.5 * controlY + 0.25 * targetNode.y - 7,
-          font: "12.5px Georgia, serif",
-          color: edge.color
-        });
       }
     }
 
-    for (const node of nodesById.values()) {
-      renderingContext.beginPath();
-      renderingContext.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
-      renderingContext.fillStyle = theme.background;
-      renderingContext.fill();
-      renderingContext.strokeStyle = theme.accent;
-      renderingContext.lineWidth = node.filtered ? 4 : 2;
-      renderingContext.stroke();
+    for (const label of labels) {
+      label.x = Math.min(Math.max(label.x, label.halfWidth + 2), WORLD_WIDTH - label.halfWidth - 2);
+      label.y = Math.min(Math.max(label.y, 12), WORLD_HEIGHT - 12);
+    }
+  }
 
-      // Подписи персонажей — в том же стиле с подложкой, что и подписи связей
+  function drawFrame() {
+    const theme = readThemeColors();
+    renderingContext.clearRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    computeEdgeGeometries();
+
+    const labelDrawQueue = [];
+
+    for (const edge of edges) {
+      if (!edge.geometry) { continue; }
+      const geometry = edge.geometry;
+
+      // Подсвеченная связь плавно утолщается и становится ярче
+      renderingContext.beginPath();
+      renderingContext.moveTo(geometry.sourceX, geometry.sourceY);
+      renderingContext.quadraticCurveTo(geometry.controlX, geometry.controlY, geometry.targetX, geometry.targetY);
+      renderingContext.strokeStyle = edge.color;
+      renderingContext.globalAlpha = 0.82 + 0.18 * edge.hoverT;
+      renderingContext.lineWidth = 2.5 + 1.8 * edge.hoverT;
+      renderingContext.stroke();
+      renderingContext.globalAlpha = 1;
+
+      if (edge.oneWay) {
+        const tangentX = geometry.targetX - geometry.controlX;
+        const tangentY = geometry.targetY - geometry.controlY;
+        const tangentLength = Math.max(Math.hypot(tangentX, tangentY), 1);
+        const unitX = tangentX / tangentLength;
+        const unitY = tangentY / tangentLength;
+        const tipX = geometry.targetX - unitX * 33;
+        const tipY = geometry.targetY - unitY * 33;
+        const baseX = tipX - unitX * 12;
+        const baseY = tipY - unitY * 12;
+        const sideX = -unitY * (6 + 2 * edge.hoverT);
+        const sideY = unitX * (6 + 2 * edge.hoverT);
+
+        renderingContext.beginPath();
+        renderingContext.moveTo(tipX, tipY);
+        renderingContext.lineTo(baseX + sideX, baseY + sideY);
+        renderingContext.lineTo(baseX - sideX, baseY - sideY);
+        renderingContext.closePath();
+        renderingContext.fillStyle = edge.color;
+        renderingContext.fill();
+      }
+
+      const labelAnchor = quadraticPoint(geometry, 0.5);
       labelDrawQueue.push({
-        text: node.label, x: node.x, y: node.y + 48,
-        font: "15px Georgia, serif", color: theme.text
+        text: edge.label,
+        x: labelAnchor.x, y: labelAnchor.y - 7,
+        font: (edge.hoverT > 0.5 ? "bold " : "") + "12.5px Georgia, serif",
+        color: edge.color,
+        fixed: false
       });
     }
 
+    for (const [nodeId, node] of nodesById) {
+      const radius = NODE_RADIUS * node.scale;
+
+      // Перетаскиваемый узел «приподнимается» — мягкая тень под ним
+      if (nodeId === draggedNodeId || node.scale > 1.12) {
+        renderingContext.shadowColor = "rgba(0, 0, 0, 0.35)";
+        renderingContext.shadowBlur = 14 * (node.scale - 1) * 6;
+        renderingContext.shadowOffsetY = 3;
+      }
+
+      renderingContext.beginPath();
+      renderingContext.arc(node.x, node.y, radius, 0, Math.PI * 2);
+      renderingContext.fillStyle = theme.background;
+      renderingContext.fill();
+      renderingContext.shadowColor = "transparent";
+      renderingContext.shadowBlur = 0;
+      renderingContext.shadowOffsetY = 0;
+
+      renderingContext.strokeStyle = theme.accent;
+      renderingContext.lineWidth = (node.filtered ? 4 : 2) + 1.2 * (node.scale - 1) * 8;
+      renderingContext.stroke();
+
+      // Подписи персонажей — в том же стиле с подложкой; в раскладке они неподвижны
+      labelDrawQueue.push({
+        text: node.label, x: node.x, y: node.y + radius + 18,
+        font: "15px Georgia, serif", color: theme.text,
+        fixed: true
+      });
+    }
+
+    relaxLabelPositions(labelDrawQueue);
     for (const label of labelDrawQueue) {
       drawHaloedText(label.text, label.x, label.y, label.font, label.color, theme.surface);
     }
@@ -260,7 +422,7 @@ window.charlaiuGraph = (() => {
     wakeSimulation();
   }
 
-  // ----- Обработка мыши -----
+  // ----- Обработка мыши на холсте -----
 
   function handlePointerDown(pointerEvent) {
     if (pointerEvent.button !== 0) { return; }
@@ -271,6 +433,8 @@ window.charlaiuGraph = (() => {
     pointerWasDragged = false;
     nodesById.get(nodeId).pinned = true;
     canvasElement.setPointerCapture(pointerEvent.pointerId);
+    canvasElement.style.cursor = "grabbing";
+    wakeSimulation();
     pointerEvent.preventDefault();
   }
 
@@ -287,7 +451,18 @@ window.charlaiuGraph = (() => {
       return;
     }
 
-    canvasElement.style.cursor = findNodeAt(toWorldCoordinates(pointerEvent)) !== null ? "grab" : "default";
+    const worldPoint = toWorldCoordinates(pointerEvent);
+    const nodeUnderPointer = findNodeAt(worldPoint);
+    const edgeUnderPointer = nodeUnderPointer === null ? findEdgeAt(worldPoint) : null;
+
+    if (nodeUnderPointer !== hoveredNodeId || edgeUnderPointer !== hoveredEdgeId) {
+      hoveredNodeId = nodeUnderPointer;
+      hoveredEdgeId = edgeUnderPointer;
+      wakeSimulation();
+    }
+
+    canvasElement.style.cursor =
+      nodeUnderPointer !== null ? "grab" : edgeUnderPointer !== null ? "pointer" : "default";
   }
 
   function handlePointerUp() {
@@ -295,48 +470,99 @@ window.charlaiuGraph = (() => {
       const draggedNode = nodesById.get(draggedNodeId);
       if (draggedNode) { draggedNode.pinned = false; }
       draggedNodeId = null;
+      canvasElement.style.cursor = "default";
       wakeSimulation();
     }
   }
 
-  /**
-   * Ставит контекстное меню под курсор. Строгая CSP запрещает инлайновые
-   * атрибуты style, поэтому позиция задаётся через CSSOM после рендера Blazor.
-   */
-  function positionContextMenuWhenRendered(clientX, clientY, attemptsLeft) {
-    const menuElement = document.querySelector(".node-context-menu");
-    if (!menuElement) {
-      if (attemptsLeft > 0) {
-        requestAnimationFrame(() => positionContextMenuWhenRendered(clientX, clientY, attemptsLeft - 1));
-      }
-      return;
+  function handlePointerLeave() {
+    if (hoveredNodeId !== null || hoveredEdgeId !== null) {
+      hoveredNodeId = null;
+      hoveredEdgeId = null;
+      wakeSimulation();
     }
-
-    // Меню не выходит за края окна
-    const menuRect = menuElement.getBoundingClientRect();
-    const clampedX = Math.min(clientX, window.innerWidth - menuRect.width - 8);
-    const clampedY = Math.min(clientY, window.innerHeight - menuRect.height - 8);
-    menuElement.style.left = Math.max(8, clampedX) + "px";
-    menuElement.style.top = Math.max(8, clampedY) + "px";
-    menuElement.style.visibility = "visible";
   }
 
   function handleContextMenu(pointerEvent) {
     pointerEvent.preventDefault();
-    const nodeId = findNodeAt(toWorldCoordinates(pointerEvent));
-    if (nodeId !== null && dotNetReference) {
+    if (!dotNetReference) { return; }
+
+    const worldPoint = toWorldCoordinates(pointerEvent);
+    const nodeId = findNodeAt(worldPoint);
+
+    if (nodeId !== null) {
       dotNetReference
         .invokeMethodAsync("ShowNodeContextMenuFromGraph", nodeId, pointerEvent.clientX, pointerEvent.clientY)
-        .then(() => positionContextMenuWhenRendered(pointerEvent.clientX, pointerEvent.clientY, 10));
+        .then(() => window.charlaiuInterop.positionContextMenu(pointerEvent.clientX, pointerEvent.clientY));
+      return;
+    }
+
+    const edgeId = findEdgeAt(worldPoint);
+    if (edgeId !== null) {
+      dotNetReference
+        .invokeMethodAsync("ShowEdgeContextMenuFromGraph", edgeId, pointerEvent.clientX, pointerEvent.clientY)
+        .then(() => window.charlaiuInterop.positionContextMenu(pointerEvent.clientX, pointerEvent.clientY));
     }
   }
 
-  function handleClick(pointerEvent) {
+  function handleClick() {
     // Простой клик (без перетаскивания) закрывает контекстное меню
     if (!pointerWasDragged && dotNetReference) {
       dotNetReference.invokeMethodAsync("CloseNodeContextMenuFromGraph");
     }
     pointerWasDragged = false;
+  }
+
+  // ----- Перетаскивание строк списка связей (настройка порядка дуг) -----
+
+  let listDragSourceId = null;
+  let listDragSourceRow = null;
+  let listDragTargetRow = null;
+
+  function clearListDragHighlight() {
+    if (listDragSourceRow) { listDragSourceRow.classList.remove("dragging"); }
+    if (listDragTargetRow) { listDragTargetRow.classList.remove("drag-over"); }
+    listDragSourceRow = null;
+    listDragTargetRow = null;
+  }
+
+  function handleListPointerDown(pointerEvent) {
+    const dragHandle = pointerEvent.target.closest ? pointerEvent.target.closest(".drag-handle") : null;
+    if (!dragHandle) { return; }
+    const rowElement = dragHandle.closest(".relationship-item");
+    if (!rowElement || !rowElement.dataset.relationshipId) { return; }
+
+    listDragSourceId = rowElement.dataset.relationshipId;
+    listDragSourceRow = rowElement;
+    rowElement.classList.add("dragging");
+    pointerEvent.preventDefault();
+  }
+
+  function handleListPointerMove(pointerEvent) {
+    if (listDragSourceId === null) { return; }
+
+    const elementUnderPointer = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY);
+    const rowUnderPointer = elementUnderPointer && elementUnderPointer.closest
+      ? elementUnderPointer.closest(".relationship-item") : null;
+
+    if (rowUnderPointer !== listDragTargetRow) {
+      if (listDragTargetRow) { listDragTargetRow.classList.remove("drag-over"); }
+      listDragTargetRow = rowUnderPointer !== listDragSourceRow ? rowUnderPointer : null;
+      if (listDragTargetRow) { listDragTargetRow.classList.add("drag-over"); }
+    }
+  }
+
+  function handleListPointerUp() {
+    if (listDragSourceId === null) { return; }
+
+    const targetId = listDragTargetRow ? listDragTargetRow.dataset.relationshipId : null;
+    const sourceId = listDragSourceId;
+    listDragSourceId = null;
+    clearListDragHighlight();
+
+    if (targetId && targetId !== sourceId && dotNetReference) {
+      dotNetReference.invokeMethodAsync("ReorderRelationshipFromList", sourceId, targetId);
+    }
   }
 
   // ----- Публичный интерфейс -----
@@ -359,8 +585,13 @@ window.charlaiuGraph = (() => {
       canvasElement.addEventListener("pointermove", handlePointerMove);
       canvasElement.addEventListener("pointerup", handlePointerUp);
       canvasElement.addEventListener("pointercancel", handlePointerUp);
+      canvasElement.addEventListener("pointerleave", handlePointerLeave);
       canvasElement.addEventListener("contextmenu", handleContextMenu);
       canvasElement.addEventListener("click", handleClick);
+
+      document.addEventListener("pointerdown", handleListPointerDown);
+      document.addEventListener("pointermove", handleListPointerMove);
+      document.addEventListener("pointerup", handleListPointerUp);
 
       animationLoop();
     },
@@ -369,7 +600,7 @@ window.charlaiuGraph = (() => {
      * Обновляет данные графа. Узлы получают позиции по «золотому углу»,
      * уже существующие узлы сохраняют свои координаты и скорость.
      * @param {Array<{id:string,label:string,filtered:boolean}>} graphNodes
-     * @param {Array<{a:string,b:string,label:string,color:string,oneWay:boolean}>} graphEdges
+     * @param {Array<{id:string,a:string,b:string,label:string,color:string,oneWay:boolean}>} graphEdges
      */
     setData(graphNodes, graphEdges) {
       const incomingIds = new Set(graphNodes.map(node => node.id));
@@ -390,12 +621,15 @@ window.charlaiuGraph = (() => {
             vx: 0, vy: 0,
             label: incomingNode.label,
             filtered: incomingNode.filtered,
-            pinned: false
+            pinned: false,
+            scale: 1, targetScale: 1
           });
         }
       }
 
-      edges = graphEdges;
+      // Состояние подсветки переживает обновление данных
+      const previousHover = new Map(edges.map(edge => [edge.id, edge.hoverT]));
+      edges = graphEdges.map(edge => ({ ...edge, hoverT: previousHover.get(edge.id) || 0, geometry: null }));
       wakeSimulation();
     },
 
@@ -411,9 +645,16 @@ window.charlaiuGraph = (() => {
         canvasElement.removeEventListener("pointermove", handlePointerMove);
         canvasElement.removeEventListener("pointerup", handlePointerUp);
         canvasElement.removeEventListener("pointercancel", handlePointerUp);
+        canvasElement.removeEventListener("pointerleave", handlePointerLeave);
         canvasElement.removeEventListener("contextmenu", handleContextMenu);
         canvasElement.removeEventListener("click", handleClick);
       }
+      document.removeEventListener("pointerdown", handleListPointerDown);
+      document.removeEventListener("pointermove", handleListPointerMove);
+      document.removeEventListener("pointerup", handleListPointerUp);
+      listDragSourceId = null;
+      clearListDragHighlight();
+
       canvasElement = null;
       renderingContext = null;
       dotNetReference = null;
@@ -421,6 +662,8 @@ window.charlaiuGraph = (() => {
       edges = [];
       spawnedNodesCounter = 0;
       draggedNodeId = null;
+      hoveredNodeId = null;
+      hoveredEdgeId = null;
     }
   };
 })();

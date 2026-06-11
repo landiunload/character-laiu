@@ -28,6 +28,29 @@ window.charlaiuInterop = {
   /** Возвращает сохранённую тему оформления (или пустую строку). */
   readSavedTheme() {
     return localStorage.getItem("charlaiu.theme") || "";
+  },
+
+  /**
+   * Ставит контекстное меню под курсор. Строгая CSP запрещает инлайновые
+   * атрибуты style, поэтому позиция задаётся через CSSOM после рендера Blazor.
+   * Меню не выходит за края окна.
+   */
+  positionContextMenu(clientX, clientY, attemptsLeft = 10) {
+    const menuElement = document.querySelector(".node-context-menu");
+    if (!menuElement) {
+      if (attemptsLeft > 0) {
+        requestAnimationFrame(() =>
+          window.charlaiuInterop.positionContextMenu(clientX, clientY, attemptsLeft - 1));
+      }
+      return;
+    }
+
+    const menuRect = menuElement.getBoundingClientRect();
+    const clampedX = Math.min(clientX, window.innerWidth - menuRect.width - 8);
+    const clampedY = Math.min(clientY, window.innerHeight - menuRect.height - 8);
+    menuElement.style.left = Math.max(8, clampedX) + "px";
+    menuElement.style.top = Math.max(8, clampedY) + "px";
+    menuElement.style.visibility = "visible";
   }
 };
 

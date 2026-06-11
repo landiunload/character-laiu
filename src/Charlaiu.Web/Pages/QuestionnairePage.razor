@@ -27,19 +27,16 @@
         <div class="sidebar-actions">
             <button class="primary-button" @onclick="CreateCharacterProfileAsync">+ Новый герой</button>
 
-            <div class="action-buttons-row">
+            <div class="action-buttons-grid">
                 <button class="secondary-button" title="Дублировать героя" @onclick="DuplicateSelectedCharacterProfileAsync" disabled="@(_selectedCharacterProfile is null)">Копия</button>
                 <button class="secondary-button" title="Открыть диалог печати" @onclick="PrintCurrentProfileAsync" disabled="@(_selectedCharacterProfile is null)">Печать</button>
-                <button class="danger-button" title="Удалить героя" @onclick="DeleteSelectedCharacterProfileAsync" disabled="@(_selectedCharacterProfile is null)">Удалить</button>
-            </div>
-
-            <div class="action-buttons-row">
                 <button class="secondary-button" title="Скачать готовый документ" @onclick="ExportSelectedProfileAsMarkdownAsync" disabled="@(_selectedCharacterProfile is null)">Markdown</button>
                 <button class="secondary-button" title="Скачать резервную копию" @onclick="ExportSelectedProfileAsJsonAsync" disabled="@(_selectedCharacterProfile is null)">JSON</button>
                 <label class="secondary-button import-label" title="Загрузить героя из файла">
                     Импорт
                     <InputFile OnChange="ImportProfileFromJsonAsync" accept=".json" class="hidden-file-input" />
                 </label>
+                <button class="danger-button" title="Удалить героя" @onclick="DeleteSelectedCharacterProfileAsync" disabled="@(_selectedCharacterProfile is null)">Удалить</button>
             </div>
         </div>
 
@@ -157,6 +154,13 @@
 
                 <p class="graph-hint">Узлы можно перетаскивать мышью — отпусти, и граф сам уляжется. Правый клик по герою — меню действий.</p>
 
+                @if (_contextMenuNodeIdentifier is not null || _contextMenuEdgeIdentifier is not null)
+                {
+                    <div class="context-menu-backdrop"
+                         @onclick="CloseContextMenusFromBackdrop"
+                         @oncontextmenu="CloseContextMenusFromBackdrop" @oncontextmenu:preventDefault></div>
+                }
+
                 @if (_contextMenuNodeIdentifier is not null)
                 {
                     <div class="node-context-menu">
@@ -167,13 +171,35 @@
                         <button class="node-context-menu-item" @onclick="FilterByContextMenuNode">Только его связи</button>
                     </div>
                 }
+                else if (_contextMenuEdgeIdentifier is not null && FindRelationship(_contextMenuEdgeIdentifier.Value) is { } menuRelationship)
+                {
+                    <div class="node-context-menu">
+                        <div class="node-context-menu-title">
+                            @NameByIdentifier(menuRelationship.FirstCharacterIdentifier)
+                            @(menuRelationship.IsOneDirectional ? " → " : " — ")@menuRelationship.Label@(menuRelationship.IsOneDirectional ? " → " : " — ")@NameByIdentifier(menuRelationship.SecondCharacterIdentifier)
+                        </div>
+                        @if (menuRelationship.IsOneDirectional)
+                        {
+                            <button class="node-context-menu-item" @onclick="ReverseEdgeDirectionAsync">Развернуть стрелку</button>
+                            <button class="node-context-menu-item" @onclick="ToggleEdgeOrientationAsync">Сделать двусторонней</button>
+                        }
+                        else
+                        {
+                            <button class="node-context-menu-item" @onclick="ToggleEdgeOrientationAsync">Сделать односторонней</button>
+                        }
+                        <button class="node-context-menu-item danger" @onclick="DeleteEdgeFromMenuAsync">Удалить связь</button>
+                    </div>
+                }
 
                 @if (VisibleRelationships().Any())
                 {
                     <ul class="relationships-list">
                         @foreach (var relationship in VisibleRelationships())
                         {
-                            <li class="relationship-item">
+                            <li class="relationship-item" data-relationship-id="@relationship.Identifier"
+                                @oncontextmenu="mouseEvent => ShowRelationshipRowMenuAsync(relationship.Identifier, mouseEvent)"
+                                @oncontextmenu:preventDefault>
+                                <span class="drag-handle" title="Потяни, чтобы изменить порядок дуг на графе">⠿</span>
                                 <svg class="relationship-color-dot" width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="6" fill="@relationship.ColorHex" /></svg>
                                 <span>
                                     @NameByIdentifier(relationship.FirstCharacterIdentifier)
@@ -332,12 +358,13 @@
     private sealed record GraphNodeDto(string Id, string Label, bool Filtered);
 
     /// <summary>Ребро графа для передачи в JavaScript.</summary>
-    private sealed record GraphEdgeDto(string A, string B, string Label, string Color, bool OneWay);
+    private sealed record GraphEdgeDto(string Id, string A, string B, string Label, string Color, bool OneWay);
 
     private DotNetObjectReference<QuestionnairePage>? _dotNetReference;
     private bool _graphIsInitialized;
 
     private Guid? _contextMenuNodeIdentifier;
+    private Guid? _contextMenuEdgeIdentifier;
 
     /// <summary>Инициализирует canvas-граф, когда вид «Связи» впервые отрисован.</summary>
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -365,6 +392,7 @@
 
         var graphEdges = VisibleRelationships()
             .Select(relationship => new GraphEdgeDto(
+                relationship.Identifier.ToString(),
                 relationship.FirstCharacterIdentifier.ToString(),
                 relationship.SecondCharacterIdentifier.ToString(),
                 relationship.Label,
@@ -389,17 +417,110 @@
         StateHasChanged();
     }
 
-    /// <summary>Закрывает меню узла по клику на пустом месте графа.</summary>
+    /// <summary>Показывает меню связи в точке клика по линии на графе.</summary>
     [JSInvokable]
-    public void CloseNodeContextMenuFromGraph()
+    public void ShowEdgeContextMenuFromGraph(string edgeIdentifier, double clientX, double clientY)
     {
-        if (_contextMenuNodeIdentifier is null) { return; }
+        if (!Guid.TryParse(edgeIdentifier, out var parsedIdentifier)) { return; }
 
         _contextMenuNodeIdentifier = null;
+        _contextMenuEdgeIdentifier = parsedIdentifier;
         StateHasChanged();
     }
 
-    private void CloseNodeContextMenu() => _contextMenuNodeIdentifier = null;
+    /// <summary>Закрывает меню по клику на пустом месте графа.</summary>
+    [JSInvokable]
+    public void CloseNodeContextMenuFromGraph()
+    {
+        if (_contextMenuNodeIdentifier is null && _contextMenuEdgeIdentifier is null) { return; }
+
+        _contextMenuNodeIdentifier = null;
+        _contextMenuEdgeIdentifier = null;
+        StateHasChanged();
+    }
+
+    private void CloseNodeContextMenu()
+    {
+        _contextMenuNodeIdentifier = null;
+        _contextMenuEdgeIdentifier = null;
+    }
+
+    private CharacterRelationship? FindRelationship(Guid relationshipIdentifier) =>
+        _allRelationships.FirstOrDefault(relationship => relationship.Identifier == relationshipIdentifier);
+
+    /// <summary>Меняет местами участников односторонней связи — стрелка разворачивается.</summary>
+    private async Task ReverseEdgeDirectionAsync()
+    {
+        if (_contextMenuEdgeIdentifier is { } edgeIdentifier && FindRelationship(edgeIdentifier) is { } relationship)
+        {
+            (relationship.FirstCharacterIdentifier, relationship.SecondCharacterIdentifier) =
+                (relationship.SecondCharacterIdentifier, relationship.FirstCharacterIdentifier);
+            await SaveRelationshipsAndRefreshAsync();
+        }
+
+        CloseNodeContextMenu();
+    }
+
+    /// <summary>Переключает связь между односторонней и двусторонней.</summary>
+    private async Task ToggleEdgeOrientationAsync()
+    {
+        if (_contextMenuEdgeIdentifier is { } edgeIdentifier && FindRelationship(edgeIdentifier) is { } relationship)
+        {
+            relationship.IsOneDirectional = !relationship.IsOneDirectional;
+            await SaveRelationshipsAndRefreshAsync();
+        }
+
+        CloseNodeContextMenu();
+    }
+
+    private async Task DeleteEdgeFromMenuAsync()
+    {
+        if (_contextMenuEdgeIdentifier is { } edgeIdentifier)
+        {
+            await DeleteRelationshipAsync(edgeIdentifier);
+        }
+
+        CloseNodeContextMenu();
+    }
+
+    private async Task SaveRelationshipsAndRefreshAsync()
+    {
+        await CharacterRelationshipRepository.SaveAllRelationshipsAsync(_allRelationships);
+        await PushGraphDataAsync();
+    }
+
+    // ----- Порядок связей: перетаскивание строк списка (события приходят из JavaScript) -----
+
+    /// <summary>Перестановка связи на место строки, на которую её уронили. Порядок задаёт раскладку дуг.</summary>
+    [JSInvokable]
+    public async Task ReorderRelationshipFromList(string sourceIdentifier, string targetIdentifier)
+    {
+        if (!Guid.TryParse(sourceIdentifier, out var parsedSource) ||
+            !Guid.TryParse(targetIdentifier, out var parsedTarget) ||
+            parsedSource == parsedTarget ||
+            FindRelationship(parsedSource) is not { } draggedRelationship)
+        {
+            return;
+        }
+
+        _allRelationships.Remove(draggedRelationship);
+        var targetIndex = _allRelationships.FindIndex(relationship => relationship.Identifier == parsedTarget);
+        _allRelationships.Insert(targetIndex < 0 ? _allRelationships.Count : targetIndex, draggedRelationship);
+
+        await SaveRelationshipsAndRefreshAsync();
+        StateHasChanged();
+    }
+
+    private void CloseContextMenusFromBackdrop() => CloseNodeContextMenu();
+
+    /// <summary>Правый клик по строке списка открывает то же меню действий, что и по линии на графе.</summary>
+    private async Task ShowRelationshipRowMenuAsync(Guid relationshipIdentifier, MouseEventArgs mouseEvent)
+    {
+        _contextMenuNodeIdentifier = null;
+        _contextMenuEdgeIdentifier = relationshipIdentifier;
+        await JavascriptRuntime.InvokeVoidAsync(
+            "charlaiuInterop.positionContextMenu", mouseEvent.ClientX, mouseEvent.ClientY);
+    }
 
     private void OpenProfileFromContextMenu()
     {

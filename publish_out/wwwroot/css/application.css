@@ -54,7 +54,7 @@ body {
 
 .sidebar-actions { display: flex; flex-direction: column; gap: 6px; }
 .action-buttons-row { display: flex; gap: 6px; }
-.action-buttons-row > * { flex: 1; }
+.action-buttons-row > * { flex: 1 1 0; min-width: 0; }
 
 .characters-list {
   list-style: none; margin: 0; padding: 0;
@@ -81,7 +81,7 @@ body {
 .secondary-button:disabled, .danger-button:disabled { opacity: 0.45; cursor: default; }
 .danger-button { background: none; color: var(--danger-color); border: 1px solid var(--danger-color); }
 
-.import-label { display: block; cursor: pointer; }
+.import-label { display: block; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hidden-file-input { display: none; }
 
 /* Редактор анкеты */
@@ -270,15 +270,9 @@ body {
 .form-message { color: var(--danger-color); font-size: 0.9rem; margin: 0 0 0.6rem; }
 
 .relationships-graph {
-  width: 100%; height: auto; background: var(--surface-color);
+  display: block; width: 100%; aspect-ratio: 800 / 520;
+  background: var(--surface-color);
   border: 1px solid var(--border-color); border-radius: 12px;
-}
-.graph-node-circle { fill: var(--background-color); stroke: var(--accent-color); stroke-width: 2; }
-.graph-node-label { fill: var(--text-color); font-size: 15px; text-anchor: middle; font-family: Georgia, serif; }
-.graph-edge-label {
-  font-size: 12.5px; text-anchor: middle; font-family: Georgia, serif;
-  /* Подложка цветом фона делает подпись читаемой поверх линий */
-  paint-order: stroke; stroke: var(--surface-color); stroke-width: 4px; stroke-linejoin: round;
 }
 
 .relationships-list { list-style: none; margin: 1rem 0 0; padding: 0; }
@@ -286,7 +280,7 @@ body {
   display: flex; align-items: center; gap: 10px; padding: 8px 4px;
   border-bottom: 1px solid var(--border-color);
 }
-.relationship-color-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.relationship-color-dot { flex-shrink: 0; display: block; }
 .relationship-item .icon-button { margin-left: auto; padding: 0 4px; }
 
 @media print {
@@ -309,8 +303,10 @@ body {
 .category-toggle-arrow { width: 1em; }
 .category-toggle-name { flex: 1; text-align: left; }
 .category-toggle-count {
+  display: inline-flex; align-items: center; justify-content: center;
   background: var(--surface-color); border: 1px solid var(--border-color);
-  border-radius: 10px; padding: 0 7px; font-size: 0.8rem;
+  border-radius: 10px; min-width: 1.7em; height: 1.55em;
+  padding: 0 6px; font-size: 0.8rem; line-height: 1;
 }
 
 .category-row { display: flex; align-items: center; gap: 8px; margin-bottom: 1.1rem; }
@@ -324,15 +320,34 @@ body {
 
 /* --- Граф: перетаскивание, меню, фильтр --- */
 .relationships-graph { touch-action: none; }
-.graph-node-circle { cursor: grab; }
-.graph-node-circle:active { cursor: grabbing; }
-.graph-node-circle.filtered { stroke-width: 4; }
 .graph-hint { color: var(--muted-text-color); font-size: 0.85rem; margin-top: 6px; }
 
-.one-directional-checkbox {
-  display: inline-flex; align-items: center; gap: 5px;
-  color: var(--muted-text-color); font-size: 0.9rem; white-space: nowrap;
+/* Переключатель «односторонняя связь» в стиле приложения */
+.direction-toggle {
+  display: inline-flex; align-items: center; gap: 7px;
+  cursor: pointer; user-select: none; white-space: nowrap;
 }
+.direction-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.direction-toggle-track {
+  width: 34px; height: 19px; border-radius: 10px; flex-shrink: 0;
+  background: var(--background-color); border: 1px solid var(--border-color);
+  position: relative; transition: background 0.18s ease, border-color 0.18s ease;
+}
+.direction-toggle-thumb {
+  position: absolute; top: 2px; left: 2px; width: 13px; height: 13px;
+  border-radius: 50%; background: var(--muted-text-color);
+  transition: left 0.18s ease, background 0.18s ease;
+}
+.direction-toggle input:checked + .direction-toggle-track {
+  background: var(--accent-color); border-color: var(--accent-color);
+}
+.direction-toggle input:checked + .direction-toggle-track .direction-toggle-thumb {
+  left: 17px; background: var(--accent-text-color);
+}
+.direction-toggle input:focus-visible + .direction-toggle-track {
+  outline: 2px solid var(--accent-color); outline-offset: 2px;
+}
+.direction-toggle-text { color: var(--muted-text-color); font-size: 0.9rem; }
 
 .filter-banner { color: var(--muted-text-color); font-size: 0.92rem; margin: 0 0 0.6rem; }
 .link-button {
@@ -341,7 +356,7 @@ body {
 }
 
 .node-context-menu {
-  position: fixed; z-index: 50; min-width: 210px;
+  position: fixed; z-index: 50; min-width: 210px; visibility: hidden;
   background: var(--surface-color); border: 1px solid var(--border-color);
   border-radius: 10px; padding: 6px; box-shadow: 0 8px 28px rgba(0,0,0,0.22);
 }
@@ -359,3 +374,32 @@ body {
 @media print {
   .node-context-menu, .category-row { display: none !important; }
 }
+
+/* --- Заготовки связей: выбор и редактор --- */
+.preset-picker { display: inline-flex; align-items: center; gap: 6px; }
+.preset-color-dot { flex-shrink: 0; display: block; }
+.preset-settings-button {
+  background: var(--surface-color); border: 1px solid var(--border-color); border-radius: 8px;
+  color: var(--muted-text-color); cursor: pointer; font-size: 0.95rem;
+  padding: 6px 9px; line-height: 1;
+}
+.preset-settings-button:hover { color: var(--accent-color); border-color: var(--accent-color); }
+
+.preset-editor {
+  background: var(--surface-color); border: 1px solid var(--border-color);
+  border-radius: 12px; padding: 10px 12px; margin-bottom: 0.8rem; max-width: 420px;
+}
+.preset-editor-title { font-weight: bold; font-size: 0.92rem; margin-bottom: 8px; }
+.preset-editor-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.preset-color-input {
+  width: 34px; height: 28px; padding: 1px; flex-shrink: 0;
+  background: none; border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer;
+}
+.preset-name-input {
+  flex: 1; font: inherit; font-size: 0.92rem; padding: 6px 9px;
+  background: var(--background-color); color: var(--text-color);
+  border: 1px solid var(--border-color); border-radius: 8px; outline: none;
+}
+.preset-name-input:focus { border-color: var(--accent-color); }
+.preset-editor .add-field-button { margin-top: 4px; }
+.preset-editor .icon-button { padding: 0 4px; }
