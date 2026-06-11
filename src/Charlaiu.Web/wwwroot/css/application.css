@@ -245,10 +245,9 @@ body {
 
 .column-label-input {
   font: inherit; font-size: 0.85rem; color: var(--muted-text-color);
-  background: none; border: none; border-bottom: 1px dashed var(--border-color);
-  outline: none; width: 100%;
+  background: none; border: none; outline: none; width: 100%;
 }
-.column-label-input:focus { border-bottom-color: var(--accent-color); color: var(--text-color); }
+.column-label-input:focus { color: var(--text-color); }
 
 .field-row { grid-template-columns: 190px 1fr 76px; }
 .field-row.paired { grid-template-columns: 190px 1fr 1fr 76px; }
@@ -276,7 +275,11 @@ body {
 }
 .graph-node-circle { fill: var(--background-color); stroke: var(--accent-color); stroke-width: 2; }
 .graph-node-label { fill: var(--text-color); font-size: 15px; text-anchor: middle; font-family: Georgia, serif; }
-.graph-edge-label { font-size: 12.5px; text-anchor: middle; font-family: Georgia, serif; }
+.graph-edge-label {
+  font-size: 12.5px; text-anchor: middle; font-family: Georgia, serif;
+  /* Подложка цветом фона делает подпись читаемой поверх линий */
+  paint-order: stroke; stroke: var(--surface-color); stroke-width: 4px; stroke-linejoin: round;
+}
 
 .relationships-list { list-style: none; margin: 1rem 0 0; padding: 0; }
 .relationship-item {
@@ -293,4 +296,66 @@ body {
   .field-row.paired { grid-template-columns: 190px 1fr 1fr; }
   .paired-columns-header { grid-template-columns: 190px 1fr 1fr; }
   .column-label-input { border-bottom: none; }
+}
+
+/* --- Категории героев в боковой панели --- */
+.category-item { margin: 6px 0 2px; }
+.category-toggle-button {
+  width: 100%; display: flex; align-items: center; gap: 6px;
+  background: none; border: none; cursor: pointer; padding: 4px 6px;
+  color: var(--muted-text-color); font: inherit; font-size: 0.85rem;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.category-toggle-arrow { width: 1em; }
+.category-toggle-name { flex: 1; text-align: left; }
+.category-toggle-count {
+  background: var(--surface-color); border: 1px solid var(--border-color);
+  border-radius: 10px; padding: 0 7px; font-size: 0.8rem;
+}
+
+.category-row { display: flex; align-items: center; gap: 8px; margin-bottom: 1.1rem; }
+.category-row-label { color: var(--muted-text-color); font-size: 0.9rem; }
+.category-input {
+  font: inherit; font-size: 0.9rem; padding: 5px 9px; flex: 1; max-width: 300px;
+  background: var(--surface-color); color: var(--text-color);
+  border: 1px solid var(--border-color); border-radius: 8px; outline: none;
+}
+.category-input:focus { border-color: var(--accent-color); }
+
+/* --- Граф: перетаскивание, меню, фильтр --- */
+.relationships-graph { touch-action: none; }
+.graph-node-circle { cursor: grab; }
+.graph-node-circle:active { cursor: grabbing; }
+.graph-node-circle.filtered { stroke-width: 4; }
+.graph-hint { color: var(--muted-text-color); font-size: 0.85rem; margin-top: 6px; }
+
+.one-directional-checkbox {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--muted-text-color); font-size: 0.9rem; white-space: nowrap;
+}
+
+.filter-banner { color: var(--muted-text-color); font-size: 0.92rem; margin: 0 0 0.6rem; }
+.link-button {
+  background: none; border: none; color: var(--accent-color);
+  font: inherit; font-size: 0.92rem; cursor: pointer; text-decoration: underline; padding: 0;
+}
+
+.node-context-menu {
+  position: fixed; z-index: 50; min-width: 210px;
+  background: var(--surface-color); border: 1px solid var(--border-color);
+  border-radius: 10px; padding: 6px; box-shadow: 0 8px 28px rgba(0,0,0,0.22);
+}
+.node-context-menu-title {
+  font-weight: bold; padding: 6px 10px; border-bottom: 1px solid var(--border-color); margin-bottom: 4px;
+}
+.node-context-menu-item {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; border-radius: 6px;
+  color: var(--text-color); font: inherit; font-size: 0.92rem;
+  padding: 7px 10px; cursor: pointer;
+}
+.node-context-menu-item:hover { background: var(--background-color); color: var(--accent-color); }
+
+@media print {
+  .node-context-menu, .category-row { display: none !important; }
 }

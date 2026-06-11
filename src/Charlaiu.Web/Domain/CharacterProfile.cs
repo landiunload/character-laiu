@@ -12,6 +12,9 @@ public sealed class CharacterProfile
     /// <summary>Имя персонажа, отображается в списке героев.</summary>
     public string DisplayName { get; set; } = "Новый герой";
 
+    /// <summary>Категория героя (например, «Главные», «Злодеи») — группирует список в боковой панели.</summary>
+    public string Category { get; set; } = string.Empty;
+
     /// <summary>Момент создания анкеты в формате UTC.</summary>
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
@@ -65,6 +68,7 @@ public sealed class CharacterProfile
     public CharacterProfile Clone() => new()
     {
         DisplayName = DisplayName + " (копия)",
+        Category = Category,
         Sections = Sections.Select(existingSection => existingSection.Clone()).ToList()
     };
 }

@@ -20,4 +20,10 @@ public sealed class CharacterRelationship
 
     /// <summary>Цвет линии на графе в формате #RRGGBB.</summary>
     public string ColorHex { get; set; } = "#888888";
+
+    /// <summary>
+    /// Односторонняя связь: чувство направлено от первого персонажа ко второму
+    /// (на графе рисуется стрелка). Двусторонняя связь — без стрелок.
+    /// </summary>
+    public bool IsOneDirectional { get; set; }
 }
