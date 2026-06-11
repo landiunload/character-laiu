@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject ICharacterProfileRepository CharacterProfileRepository
 @inject ICharacterRelationshipRepository CharacterRelationshipRepository
+@inject IRelationshipPresetRepository PresetRepository
 @inject MarkdownQuestionnaireExporter MarkdownExporter
 @inject JsonQuestionnaireExporter JsonExporter
 @inject BrowserFileDownloadService FileDownloadService
@@ -61,7 +62,7 @@
                     @foreach (var characterProfile in categoryGroup)
                     {
                         <li class="@(characterProfile.Identifier == _selectedCharacterProfile?.Identifier ? "character-item selected" : "character-item")">
-                            <button class="character-select-button" @onclick="() => SelectCharacterProfile(characterProfile)">
+                            <button class="character-select-button" @onclick="() => SelectCharacterProfileAsync(characterProfile)">
                                 @DisplayNameOf(characterProfile)
                             </button>
                         </li>
@@ -91,12 +92,16 @@
                         }
                     </select>
 
-                    <select class="relationship-select" @bind="_newRelationshipPresetName" @bind:after="ApplyRelationshipPreset">
-                        @foreach (var presetName in RelationshipPresets.Keys)
-                        {
-                            <option value="@presetName">@presetName</option>
-                        }
-                    </select>
+                    <span class="preset-picker">
+                        <svg class="preset-color-dot" width="13" height="13" viewBox="0 0 13 13"><circle cx="6.5" cy="6.5" r="6" fill="@SelectedPresetColorHex()" /></svg>
+                        <select class="relationship-select preset-select" @bind="_newRelationshipPresetName">
+                            @foreach (var relationshipPreset in _relationshipPresets)
+                            {
+                                <option value="@relationshipPreset.Name">@relationshipPreset.Name</option>
+                            }
+                        </select>
+                        <button class="preset-settings-button" title="Настроить заготовки связей" @onclick="TogglePresetEditor">⚙</button>
+                    </span>
 
                     <select class="relationship-select" @bind="_newRelationshipSecondIdentifier">
                         <option value="@Guid.Empty">— второй персонаж —</option>
@@ -106,14 +111,34 @@
                         }
                     </select>
 
-                    <input class="relationship-label-input" placeholder="Подпись связи" @bind="_newRelationshipLabel" />
-
-                    <label class="one-directional-checkbox" title="Стрелка от первого персонажа ко второму">
-                        <input type="checkbox" @bind="_newRelationshipIsOneDirectional" /> односторонняя
+                    <label class="direction-toggle" title="Стрелка от первого персонажа ко второму">
+                        <input type="checkbox" @bind="_newRelationshipIsOneDirectional" />
+                        <span class="direction-toggle-track"><span class="direction-toggle-thumb"></span></span>
+                        <span class="direction-toggle-text">односторонняя</span>
                     </label>
 
                     <button class="primary-button" @onclick="AddRelationshipAsync">Связать</button>
                 </div>
+
+                @if (_isPresetEditorOpen)
+                {
+                    <div class="preset-editor">
+                        <div class="preset-editor-title">Заготовки связей</div>
+                        @foreach (var relationshipPreset in _relationshipPresets)
+                        {
+                            <div class="preset-editor-row">
+                                <input class="preset-color-input" type="color"
+                                       @bind="relationshipPreset.ColorHex" @bind:after="SavePresetsAsync" />
+                                <input class="preset-name-input" placeholder="Название связи"
+                                       @bind="relationshipPreset.Name" @bind:after="SavePresetsAsync" />
+                                <button class="icon-button" title="Удалить заготовку"
+                                        disabled="@(_relationshipPresets.Count <= 1)"
+                                        @onclick="() => DeletePresetAsync(relationshipPreset)">✕</button>
+                            </div>
+                        }
+                        <button class="add-field-button" @onclick="AddPresetAsync">+ Заготовка</button>
+                    </div>
+                }
 
                 @if (!string.IsNullOrEmpty(_relationshipFormMessage))
                 {
@@ -124,45 +149,17 @@
                 {
                     <p class="filter-banner">
                         Показаны связи героя «@NameByIdentifier(_relationshipFilterIdentifier.Value)».
-                        <button class="link-button" @onclick="() => _relationshipFilterIdentifier = null">Показать все связи</button>
+                        <button class="link-button" @onclick="ClearRelationshipFilterAsync">Показать все связи</button>
                     </p>
                 }
 
-                <svg class="relationships-graph" width="800" height="520"
-                     @onpointermove="HandleGraphPointerMove"
-                     @onpointerup="EndNodeDrag"
-                     @onpointerleave="EndNodeDrag"
-                     @onclick="CloseNodeContextMenu">
-                    @foreach (var edge in CalculateGraphEdges())
-                    {
-                        <path d="@edge.PathData" fill="none" stroke="@edge.ColorHex" stroke-width="2.5" />
-                        @if (edge.ArrowPointsData is not null)
-                        {
-                            <polygon points="@edge.ArrowPointsData" fill="@edge.ColorHex" />
-                        }
-                        @((MarkupString)$"<text x=\"{Fmt(edge.LabelX)}\" y=\"{Fmt(edge.LabelY)}\" class=\"graph-edge-label\" fill=\"{edge.ColorHex}\">{System.Net.WebUtility.HtmlEncode(edge.Label)}</text>")
-                    }
-
-                    @foreach (var profile in _allCharacterProfiles)
-                    {
-                        var nodeState = _graphNodesByIdentifier.GetValueOrDefault(profile.Identifier);
-                        if (nodeState is null) { continue; }
-
-                        <circle cx="@Fmt(nodeState.PositionX)" cy="@Fmt(nodeState.PositionY)" r="30"
-                                class="@(profile.Identifier == _relationshipFilterIdentifier ? "graph-node-circle filtered" : "graph-node-circle")"
-                                @onpointerdown="pointerEvent => StartNodeDrag(profile.Identifier, pointerEvent)"
-                                @onpointerdown:preventDefault
-                                @oncontextmenu="pointerEvent => ShowNodeContextMenu(profile.Identifier, pointerEvent)"
-                                @oncontextmenu:preventDefault />
-                        @((MarkupString)$"<text x=\"{Fmt(nodeState.PositionX)}\" y=\"{Fmt(nodeState.PositionY + 48)}\" class=\"graph-node-label\">{System.Net.WebUtility.HtmlEncode(DisplayNameOf(profile))}</text>")
-                    }
-                </svg>
+                <canvas id="relationships-canvas" class="relationships-graph"></canvas>
 
                 <p class="graph-hint">Узлы можно перетаскивать мышью — отпусти, и граф сам уляжется. Правый клик по герою — меню действий.</p>
 
                 @if (_contextMenuNodeIdentifier is not null)
                 {
-                    <div class="node-context-menu" style="left:@(Fmt(_contextMenuScreenX))px; top:@(Fmt(_contextMenuScreenY))px">
+                    <div class="node-context-menu">
                         <div class="node-context-menu-title">@NameByIdentifier(_contextMenuNodeIdentifier.Value)</div>
                         <button class="node-context-menu-item" @onclick="OpenProfileFromContextMenu">Открыть анкету</button>
                         <button class="node-context-menu-item" @onclick="() => SetContextMenuNodeIntoForm(true)">Сделать первым в связке</button>
@@ -177,7 +174,7 @@
                         @foreach (var relationship in VisibleRelationships())
                         {
                             <li class="relationship-item">
-                                <span class="relationship-color-dot" style="background:@relationship.ColorHex"></span>
+                                <svg class="relationship-color-dot" width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="6" fill="@relationship.ColorHex" /></svg>
                                 <span>
                                     @NameByIdentifier(relationship.FirstCharacterIdentifier)
                                     @(relationship.IsOneDirectional ? " → " : " — ")<strong>@relationship.Label</strong>@(relationship.IsOneDirectional ? " → " : " — ")@NameByIdentifier(relationship.SecondCharacterIdentifier)
@@ -296,258 +293,110 @@
 
     private Guid _newRelationshipFirstIdentifier = Guid.Empty;
     private Guid _newRelationshipSecondIdentifier = Guid.Empty;
-    private string _newRelationshipPresetName = "Дружба";
-    private string _newRelationshipLabel = "Дружба";
+    private List<RelationshipPreset> _relationshipPresets = [];
+    private string _newRelationshipPresetName = string.Empty;
+    private bool _isPresetEditorOpen;
     private bool _newRelationshipIsOneDirectional;
     private string _relationshipFormMessage = string.Empty;
     private Guid? _relationshipFilterIdentifier;
 
-    // ----- Состояние физической модели графа -----
-
-    /// <summary>Положение и скорость узла в физической модели графа.</summary>
-    private sealed class GraphNodeState
-    {
-        public double PositionX;
-        public double PositionY;
-        public double VelocityX;
-        public double VelocityY;
-        public bool IsBeingDragged;
-    }
-
-    /// <summary>Готовое к отрисовке ребро графа.</summary>
-    private sealed record GraphEdge(
-        string PathData, string? ArrowPointsData, double LabelX, double LabelY, string Label, string ColorHex);
-
-    private readonly Dictionary<Guid, GraphNodeState> _graphNodesByIdentifier = [];
-    private Guid? _draggedNodeIdentifier;
-    private double _dragPointerStartX;
-    private double _dragPointerStartY;
-    private double _dragNodeStartX;
-    private double _dragNodeStartY;
-
-    private Guid? _contextMenuNodeIdentifier;
-    private double _contextMenuScreenX;
-    private double _contextMenuScreenY;
-
-    private readonly CancellationTokenSource _simulationCancellation = new();
-
-    private const double GraphWidth = 800;
-    private const double GraphHeight = 520;
-
-    /// <summary>Предустановленные типы связей и их цвета на графе.</summary>
-    private static readonly IReadOnlyDictionary<string, string> RelationshipPresets = new Dictionary<string, string>
-    {
-        ["Дружба"] = "#3a9d5d",
-        ["Вражда"] = "#c0392b",
-        ["Любовь"] = "#d4628f",
-        ["Семья"] = "#4a78c2",
-        ["Соперничество"] = "#b8772a",
-        ["Другое"] = "#888888"
-    };
-
-    /// <summary>Загружает данные и запускает цикл физической анимации графа.</summary>
+    /// <summary>Загружает героев, связи и заготовки; объединяет дубликаты связей.</summary>
     protected override async Task OnInitializedAsync()
     {
         _allCharacterProfiles = await CharacterProfileRepository.LoadAllProfilesAsync();
         _allRelationships = await CharacterRelationshipRepository.LoadAllRelationshipsAsync();
+        _relationshipPresets = await PresetRepository.LoadAllPresetsAsync();
         _selectedCharacterProfile = _allCharacterProfiles.FirstOrDefault();
+        _newRelationshipPresetName = _relationshipPresets.FirstOrDefault()?.Name ?? string.Empty;
+
+        // Накопившиеся дубликаты связей объединяются прямо при загрузке
+        if (RelationshipDeduplicator.Deduplicate(_allRelationships))
+        {
+            await CharacterRelationshipRepository.SaveAllRelationshipsAsync(_allRelationships);
+        }
 
         var savedThemeName = await JavascriptRuntime.InvokeAsync<string>("charlaiuInterop.readSavedTheme");
         _currentThemeName = string.IsNullOrWhiteSpace(savedThemeName) ? "light" : savedThemeName;
-
-        _ = RunGraphSimulationLoopAsync();
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        _simulationCancellation.Cancel();
-        _simulationCancellation.Dispose();
+        _ = JavascriptRuntime.InvokeVoidAsync("charlaiuGraph.dispose");
+        _dotNetReference?.Dispose();
     }
 
-    // ----- Физическая модель графа -----
+    // ----- Граф на canvas: рендер и физика в JavaScript -----
 
-    /// <summary>
-    /// Цикл анимации (~30 кадров в секунду): узлы отталкиваются друг от друга,
-    /// связи работают как пружины — граф сам распределяется, избегая наложений,
-    /// а отпущенный после перетаскивания узел плавно возвращается к равновесию.
-    /// </summary>
-    private async Task RunGraphSimulationLoopAsync()
+    /// <summary>Узел графа для передачи в JavaScript.</summary>
+    private sealed record GraphNodeDto(string Id, string Label, bool Filtered);
+
+    /// <summary>Ребро графа для передачи в JavaScript.</summary>
+    private sealed record GraphEdgeDto(string A, string B, string Label, string Color, bool OneWay);
+
+    private DotNetObjectReference<QuestionnairePage>? _dotNetReference;
+    private bool _graphIsInitialized;
+
+    private Guid? _contextMenuNodeIdentifier;
+
+    /// <summary>Инициализирует canvas-граф, когда вид «Связи» впервые отрисован.</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        while (!_simulationCancellation.IsCancellationRequested)
+        if (_activeViewName == "relationships" && !_graphIsInitialized && _allCharacterProfiles.Count >= 2)
         {
-            if (_activeViewName == "relationships" && _allCharacterProfiles.Count > 0)
-            {
-                SynchronizeGraphNodesWithProfiles();
-                ApplySimulationStep();
-                await InvokeAsync(StateHasChanged);
-            }
-
-            try { await Task.Delay(33, _simulationCancellation.Token); }
-            catch (OperationCanceledException) { return; }
-        }
-    }
-
-    /// <summary>Добавляет узлы для новых героев и убирает узлы удалённых.</summary>
-    private void SynchronizeGraphNodesWithProfiles()
-    {
-        var existingIdentifiers = _allCharacterProfiles.Select(profile => profile.Identifier).ToHashSet();
-
-        foreach (var staleIdentifier in _graphNodesByIdentifier.Keys.Where(key => !existingIdentifiers.Contains(key)).ToList())
-        {
-            _graphNodesByIdentifier.Remove(staleIdentifier);
-        }
-
-        foreach (var profile in _allCharacterProfiles.Where(profile => !_graphNodesByIdentifier.ContainsKey(profile.Identifier)))
-        {
-            // «Золотой угол» гарантирует, что два узла никогда не появятся в одной точке
-            var angleRadians = GoldenAngleRadians * _spawnedNodesCounter++;
-            _graphNodesByIdentifier[profile.Identifier] = new GraphNodeState
-            {
-                PositionX = GraphWidth / 2 + 160 * Math.Cos(angleRadians),
-                PositionY = GraphHeight / 2 + 140 * Math.Sin(angleRadians)
-            };
+            _graphIsInitialized = true;
+            _dotNetReference ??= DotNetObjectReference.Create(this);
+            await JavascriptRuntime.InvokeVoidAsync("charlaiuGraph.initialize", "relationships-canvas", _dotNetReference);
+            await PushGraphDataAsync();
         }
     }
 
-    private const double GoldenAngleRadians = 2.399963;
-    private int _spawnedNodesCounter;
-
-    /// <summary>Один шаг симуляции: отталкивание, пружины связей, притяжение к центру, затухание.</summary>
-    private void ApplySimulationStep()
+    /// <summary>Передаёт актуальные узлы и связи в JavaScript-рендер.</summary>
+    private async Task PushGraphDataAsync()
     {
-        const double repulsionStrength = 80000;   // отталкивание узлов друг от друга
-        const double springRestLength = 235;      // желаемая длина связи
-        const double springStiffness = 0.025;     // жёсткость пружины-связи
-        const double centeringStrength = 0.012;   // лёгкое притяжение к центру холста
-        const double velocityDamping = 0.80;      // затухание скоростей — даёт плавный «выдох» графа
+        if (!_graphIsInitialized) { return; }
 
-        var nodeStates = _graphNodesByIdentifier.Values.ToList();
+        var graphNodes = _allCharacterProfiles
+            .Select(profile => new GraphNodeDto(
+                profile.Identifier.ToString(),
+                DisplayNameOf(profile),
+                profile.Identifier == _relationshipFilterIdentifier))
+            .ToList();
 
-        // Попарное отталкивание
-        for (var firstIndex = 0; firstIndex < nodeStates.Count; firstIndex++)
-        {
-            for (var secondIndex = firstIndex + 1; secondIndex < nodeStates.Count; secondIndex++)
-            {
-                var firstNode = nodeStates[firstIndex];
-                var secondNode = nodeStates[secondIndex];
+        var graphEdges = VisibleRelationships()
+            .Select(relationship => new GraphEdgeDto(
+                relationship.FirstCharacterIdentifier.ToString(),
+                relationship.SecondCharacterIdentifier.ToString(),
+                relationship.Label,
+                relationship.ColorHex,
+                relationship.IsOneDirectional))
+            .ToList();
 
-                var deltaX = secondNode.PositionX - firstNode.PositionX;
-                var deltaY = secondNode.PositionY - firstNode.PositionY;
-
-                // Совпавшие узлы расталкиваем детерминированным сдвигом — иначе сила равна нулю
-                if (Math.Abs(deltaX) < 0.5 && Math.Abs(deltaY) < 0.5)
-                {
-                    deltaX = 1.5 + firstIndex;
-                    deltaY = -1.0 - secondIndex;
-                }
-
-                var squaredDistance = Math.Max(deltaX * deltaX + deltaY * deltaY, 400);
-                var distance = Math.Sqrt(squaredDistance);
-
-                var repulsionForce = repulsionStrength / squaredDistance;
-                var forceX = repulsionForce * deltaX / distance;
-                var forceY = repulsionForce * deltaY / distance;
-
-                firstNode.VelocityX -= forceX;
-                firstNode.VelocityY -= forceY;
-                secondNode.VelocityX += forceX;
-                secondNode.VelocityY += forceY;
-            }
-        }
-
-        // Пружины вдоль связей
-        foreach (var relationship in VisibleRelationships())
-        {
-            if (!_graphNodesByIdentifier.TryGetValue(relationship.FirstCharacterIdentifier, out var firstNode) ||
-                !_graphNodesByIdentifier.TryGetValue(relationship.SecondCharacterIdentifier, out var secondNode))
-            {
-                continue;
-            }
-
-            var deltaX = secondNode.PositionX - firstNode.PositionX;
-            var deltaY = secondNode.PositionY - firstNode.PositionY;
-            var distance = Math.Max(Math.Sqrt(deltaX * deltaX + deltaY * deltaY), 1);
-
-            var springForce = (distance - springRestLength) * springStiffness;
-            var forceX = springForce * deltaX / distance;
-            var forceY = springForce * deltaY / distance;
-
-            firstNode.VelocityX += forceX;
-            firstNode.VelocityY += forceY;
-            secondNode.VelocityX -= forceX;
-            secondNode.VelocityY -= forceY;
-        }
-
-        // Центрирование, затухание и перемещение
-        foreach (var nodeState in nodeStates)
-        {
-            if (nodeState.IsBeingDragged)
-            {
-                nodeState.VelocityX = 0;
-                nodeState.VelocityY = 0;
-                continue;
-            }
-
-            nodeState.VelocityX += (GraphWidth / 2 - nodeState.PositionX) * centeringStrength;
-            nodeState.VelocityY += (GraphHeight / 2 - nodeState.PositionY) * centeringStrength;
-
-            nodeState.VelocityX *= velocityDamping;
-            nodeState.VelocityY *= velocityDamping;
-
-            nodeState.PositionX += nodeState.VelocityX;
-            nodeState.PositionY += nodeState.VelocityY;
-
-            // Узлы не выходят за край холста
-            nodeState.PositionX = Math.Clamp(nodeState.PositionX, 45, GraphWidth - 45);
-            nodeState.PositionY = Math.Clamp(nodeState.PositionY, 45, GraphHeight - 60);
-        }
+        await JavascriptRuntime.InvokeVoidAsync("charlaiuGraph.setData", graphNodes, graphEdges);
     }
 
-    // ----- Перетаскивание узлов -----
+    // ----- Контекстное меню узла (события приходят из JavaScript) -----
 
-    private void StartNodeDrag(Guid nodeIdentifier, PointerEventArgs pointerEvent)
+    /// <summary>Показывает меню узла в точке клика.</summary>
+    [JSInvokable]
+    public void ShowNodeContextMenuFromGraph(string nodeIdentifier, double clientX, double clientY)
     {
-        if (!_graphNodesByIdentifier.TryGetValue(nodeIdentifier, out var nodeState)) { return; }
+        if (!Guid.TryParse(nodeIdentifier, out var parsedIdentifier)) { return; }
 
-        _draggedNodeIdentifier = nodeIdentifier;
-        nodeState.IsBeingDragged = true;
-        _dragPointerStartX = pointerEvent.ClientX;
-        _dragPointerStartY = pointerEvent.ClientY;
-        _dragNodeStartX = nodeState.PositionX;
-        _dragNodeStartY = nodeState.PositionY;
+        // Координаты использует JavaScript: CSP запрещает инлайновый style,
+        // поэтому меню позиционируется через CSSOM после рендера
+        _contextMenuNodeIdentifier = parsedIdentifier;
+        StateHasChanged();
     }
 
-    private void HandleGraphPointerMove(PointerEventArgs pointerEvent)
+    /// <summary>Закрывает меню узла по клику на пустом месте графа.</summary>
+    [JSInvokable]
+    public void CloseNodeContextMenuFromGraph()
     {
-        if (_draggedNodeIdentifier is null ||
-            !_graphNodesByIdentifier.TryGetValue(_draggedNodeIdentifier.Value, out var nodeState))
-        {
-            return;
-        }
+        if (_contextMenuNodeIdentifier is null) { return; }
 
-        nodeState.PositionX = Math.Clamp(_dragNodeStartX + (pointerEvent.ClientX - _dragPointerStartX), 45, GraphWidth - 45);
-        nodeState.PositionY = Math.Clamp(_dragNodeStartY + (pointerEvent.ClientY - _dragPointerStartY), 45, GraphHeight - 60);
-    }
-
-    private void EndNodeDrag()
-    {
-        if (_draggedNodeIdentifier is not null &&
-            _graphNodesByIdentifier.TryGetValue(_draggedNodeIdentifier.Value, out var nodeState))
-        {
-            nodeState.IsBeingDragged = false;
-        }
-
-        _draggedNodeIdentifier = null;
-    }
-
-    // ----- Контекстное меню узла -----
-
-    private void ShowNodeContextMenu(Guid nodeIdentifier, MouseEventArgs mouseEvent)
-    {
-        _contextMenuNodeIdentifier = nodeIdentifier;
-        _contextMenuScreenX = mouseEvent.ClientX;
-        _contextMenuScreenY = mouseEvent.ClientY;
+        _contextMenuNodeIdentifier = null;
+        StateHasChanged();
     }
 
     private void CloseNodeContextMenu() => _contextMenuNodeIdentifier = null;
@@ -558,7 +407,7 @@
         if (foundProfile is not null)
         {
             _selectedCharacterProfile = foundProfile;
-            _activeViewName = "questionnaire";
+            SwitchView("questionnaire");
         }
 
         CloseNodeContextMenu();
@@ -575,90 +424,51 @@
         CloseNodeContextMenu();
     }
 
-    private void FilterByContextMenuNode()
+    private async Task FilterByContextMenuNode()
     {
         _relationshipFilterIdentifier = _contextMenuNodeIdentifier;
         CloseNodeContextMenu();
+        await PushGraphDataAsync();
     }
 
-    // ----- Рёбра графа -----
-
-    /// <summary>
-    /// Готовит рёбра к отрисовке: параллельные связи одной пары расходятся дугами,
-    /// у односторонних связей рисуется стрелка к получателю.
-    /// </summary>
-    private IReadOnlyList<GraphEdge> CalculateGraphEdges()
+    /// <summary>Сбрасывает фильтр — снова показываются все связи.</summary>
+    private async Task ClearRelationshipFilterAsync()
     {
-        var preparedEdges = new List<GraphEdge>();
+        _relationshipFilterIdentifier = null;
+        await PushGraphDataAsync();
+    }
 
-        var relationshipsByPair = VisibleRelationships()
-            .Where(relationship =>
-                _graphNodesByIdentifier.ContainsKey(relationship.FirstCharacterIdentifier) &&
-                _graphNodesByIdentifier.ContainsKey(relationship.SecondCharacterIdentifier))
-            .GroupBy(relationship =>
-            {
-                var orderedPair = new[] { relationship.FirstCharacterIdentifier, relationship.SecondCharacterIdentifier }
-                    .OrderBy(identifier => identifier).ToArray();
-                return (orderedPair[0], orderedPair[1]);
-            });
+    // ----- Заготовки связей -----
 
-        foreach (var pairGroup in relationshipsByPair)
+    private void TogglePresetEditor() => _isPresetEditorOpen = !_isPresetEditorOpen;
+
+    /// <summary>Цвет выбранной заготовки для индикатора рядом с выпадающим списком.</summary>
+    private string SelectedPresetColorHex() =>
+        _relationshipPresets.FirstOrDefault(preset => preset.Name == _newRelationshipPresetName)?.ColorHex ?? "#888888";
+
+    private async Task SavePresetsAsync()
+    {
+        // Если выбранную заготовку переименовали или удалили — выбор следует за списком
+        if (_relationshipPresets.All(preset => preset.Name != _newRelationshipPresetName))
         {
-            var parallelRelationships = pairGroup.ToList();
-
-            // Нормаль считается по каноническому порядку пары, а не по направлению связи —
-            // иначе встречные связи изгибались бы в одну и ту же сторону и накладывались
-            var canonicalFirstNode = _graphNodesByIdentifier[pairGroup.Key.Item1];
-            var canonicalSecondNode = _graphNodesByIdentifier[pairGroup.Key.Item2];
-            var canonicalDeltaX = canonicalSecondNode.PositionX - canonicalFirstNode.PositionX;
-            var canonicalDeltaY = canonicalSecondNode.PositionY - canonicalFirstNode.PositionY;
-            var canonicalDistance = Math.Max(Math.Sqrt(canonicalDeltaX * canonicalDeltaX + canonicalDeltaY * canonicalDeltaY), 1);
-            var normalX = -canonicalDeltaY / canonicalDistance;
-            var normalY = canonicalDeltaX / canonicalDistance;
-
-            for (var parallelIndex = 0; parallelIndex < parallelRelationships.Count; parallelIndex++)
-            {
-                var relationship = parallelRelationships[parallelIndex];
-                var sourceNode = _graphNodesByIdentifier[relationship.FirstCharacterIdentifier];
-                var targetNode = _graphNodesByIdentifier[relationship.SecondCharacterIdentifier];
-
-                // Параллельные связи расходятся дугами в обе стороны от прямой
-                var arcOffset = (parallelIndex - (parallelRelationships.Count - 1) / 2.0) * 62;
-
-                var controlX = (sourceNode.PositionX + targetNode.PositionX) / 2 + normalX * arcOffset * 2;
-                var controlY = (sourceNode.PositionY + targetNode.PositionY) / 2 + normalY * arcOffset * 2;
-
-                var pathData = $"M {Fmt(sourceNode.PositionX)} {Fmt(sourceNode.PositionY)} Q {Fmt(controlX)} {Fmt(controlY)} {Fmt(targetNode.PositionX)} {Fmt(targetNode.PositionY)}";
-
-                // Точка кривой Безье при t = 0.5 — место подписи
-                var labelX = 0.25 * sourceNode.PositionX + 0.5 * controlX + 0.25 * targetNode.PositionX;
-                var labelY = 0.25 * sourceNode.PositionY + 0.5 * controlY + 0.25 * targetNode.PositionY - 7;
-
-                string? arrowPointsData = null;
-                if (relationship.IsOneDirectional)
-                {
-                    // Касательная кривой в конце направлена от контрольной точки к цели
-                    var tangentX = targetNode.PositionX - controlX;
-                    var tangentY = targetNode.PositionY - controlY;
-                    var tangentLength = Math.Max(Math.Sqrt(tangentX * tangentX + tangentY * tangentY), 1);
-                    var unitX = tangentX / tangentLength;
-                    var unitY = tangentY / tangentLength;
-
-                    var tipX = targetNode.PositionX - unitX * 33;
-                    var tipY = targetNode.PositionY - unitY * 33;
-                    var baseX = tipX - unitX * 12;
-                    var baseY = tipY - unitY * 12;
-                    var sideX = -unitY * 6;
-                    var sideY = unitX * 6;
-
-                    arrowPointsData = $"{Fmt(tipX)},{Fmt(tipY)} {Fmt(baseX + sideX)},{Fmt(baseY + sideY)} {Fmt(baseX - sideX)},{Fmt(baseY - sideY)}";
-                }
-
-                preparedEdges.Add(new GraphEdge(pathData, arrowPointsData, labelX, labelY, relationship.Label, relationship.ColorHex));
-            }
+            _newRelationshipPresetName = _relationshipPresets.FirstOrDefault()?.Name ?? string.Empty;
         }
 
-        return preparedEdges;
+        await PresetRepository.SaveAllPresetsAsync(_relationshipPresets);
+    }
+
+    private async Task AddPresetAsync()
+    {
+        _relationshipPresets.Add(new RelationshipPreset { Name = "Новая связь", ColorHex = "#888888" });
+        await SavePresetsAsync();
+    }
+
+    private async Task DeletePresetAsync(RelationshipPreset relationshipPreset)
+    {
+        if (_relationshipPresets.Count <= 1) { return; }
+
+        _relationshipPresets.Remove(relationshipPreset);
+        await SavePresetsAsync();
     }
 
     // ----- Категории -----
@@ -686,6 +496,13 @@
 
     private void SwitchView(string viewName)
     {
+        if (_activeViewName == "relationships" && viewName != "relationships" && _graphIsInitialized)
+        {
+            // Canvas исчезает из DOM — рендер останавливается и переинициализируется при возврате
+            _graphIsInitialized = false;
+            _ = JavascriptRuntime.InvokeVoidAsync("charlaiuGraph.dispose");
+        }
+
         _activeViewName = viewName;
         if (viewName == "relationships")
         {
@@ -726,13 +543,14 @@
     /// Клик по герою в списке: в виде «Анкета» открывает его анкету,
     /// в виде «Связи» — фильтрует граф по его связям.
     /// </summary>
-    private void SelectCharacterProfile(CharacterProfile characterProfile)
+    private async Task SelectCharacterProfileAsync(CharacterProfile characterProfile)
     {
         _selectedCharacterProfile = characterProfile;
 
         if (_activeViewName == "relationships")
         {
             _relationshipFilterIdentifier = characterProfile.Identifier;
+            await PushGraphDataAsync();
         }
     }
 
@@ -825,9 +643,6 @@
         await PersistChangesAsync();
     }
 
-    private void ApplyRelationshipPreset() =>
-        _newRelationshipLabel = _newRelationshipPresetName;
-
     /// <summary>Связи с существующими участниками; при активном фильтре — только связи выбранного героя.</summary>
     private IEnumerable<CharacterRelationship> VisibleRelationships()
     {
@@ -861,29 +676,51 @@
             return;
         }
 
-        _allRelationships.Add(new CharacterRelationship
+        var selectedPreset = _relationshipPresets.FirstOrDefault(preset => preset.Name == _newRelationshipPresetName);
+        var newRelationship = new CharacterRelationship
         {
             FirstCharacterIdentifier = _newRelationshipFirstIdentifier,
             SecondCharacterIdentifier = _newRelationshipSecondIdentifier,
-            Label = string.IsNullOrWhiteSpace(_newRelationshipLabel) ? _newRelationshipPresetName : _newRelationshipLabel.Trim(),
-            ColorHex = RelationshipPresets.GetValueOrDefault(_newRelationshipPresetName, "#888888"),
+            Label = selectedPreset?.Name ?? "Связь",
+            ColorHex = selectedPreset?.ColorHex ?? "#888888",
             IsOneDirectional = _newRelationshipIsOneDirectional
-        });
+        };
 
-        _relationshipFormMessage = string.Empty;
+        // Дубликаты не плодятся: встречные односторонние объединяются в двустороннюю
+        var mergeOutcome = RelationshipDeduplicator.ClassifyNewRelationship(_allRelationships, newRelationship);
+        switch (mergeOutcome.Kind)
+        {
+            case RelationshipMergeOutcomeKind.Duplicate:
+                _relationshipFormMessage = "Такая связь уже есть.";
+                return;
+
+            case RelationshipMergeOutcomeKind.MergedIntoBidirectional:
+                mergeOutcome.ExistingRelationship!.IsOneDirectional = false;
+                _relationshipFormMessage = "Встречная односторонняя связь объединена в двустороннюю.";
+                break;
+
+            default:
+                _allRelationships.Add(newRelationship);
+                _relationshipFormMessage = string.Empty;
+                break;
+        }
+
         await CharacterRelationshipRepository.SaveAllRelationshipsAsync(_allRelationships);
+        await PushGraphDataAsync();
     }
 
     private async Task DeleteRelationshipAsync(Guid relationshipIdentifier)
     {
         _allRelationships.RemoveAll(relationship => relationship.Identifier == relationshipIdentifier);
         await CharacterRelationshipRepository.SaveAllRelationshipsAsync(_allRelationships);
+        await PushGraphDataAsync();
     }
 
     private async Task ToggleThemeAsync()
     {
         _currentThemeName = _currentThemeName == "dark" ? "light" : "dark";
         await JavascriptRuntime.InvokeVoidAsync("charlaiuInterop.applyTheme", _currentThemeName);
+        await JavascriptRuntime.InvokeVoidAsync("charlaiuGraph.refresh");
     }
 
     /// <summary>Открывает системный диалог печати — печатную версию оформляет CSS.</summary>

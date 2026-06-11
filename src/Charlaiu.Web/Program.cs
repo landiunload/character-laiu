@@ -12,6 +12,7 @@ webAssemblyHostBuilder.RootComponents.Add<HeadOutlet>("head::after");
 // реализацию можно заменить, не трогая компоненты
 webAssemblyHostBuilder.Services.AddScoped<ICharacterProfileRepository, BrowserLocalStorageCharacterProfileRepository>();
 webAssemblyHostBuilder.Services.AddScoped<ICharacterRelationshipRepository, BrowserLocalStorageCharacterRelationshipRepository>();
+webAssemblyHostBuilder.Services.AddScoped<IRelationshipPresetRepository, BrowserLocalStorageRelationshipPresetRepository>();
 webAssemblyHostBuilder.Services.AddScoped<MarkdownQuestionnaireExporter>();
 webAssemblyHostBuilder.Services.AddScoped<JsonQuestionnaireExporter>();
 webAssemblyHostBuilder.Services.AddScoped<BrowserFileDownloadService>();
