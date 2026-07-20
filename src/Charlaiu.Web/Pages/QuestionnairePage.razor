@@ -44,7 +44,7 @@
             @foreach (var categoryGroup in _allCharacterProfiles
                 .GroupBy(profile => string.IsNullOrWhiteSpace(profile.Category) ? "Без категории" : profile.Category.Trim())
                 .OrderBy(group => group.Key == "Без категории" ? 1 : 0)
-                .ThenBy(group => group.Key))
+                .ThenBy(group => group.Key, StringComparer.Ordinal))
             {
                 <li class="category-item">
                     <button class="category-toggle-button" @onclick="() => ToggleCategoryCollapsed(categoryGroup.Key)">

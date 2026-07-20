@@ -7,6 +7,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- Приложению не нужны данные ICU: даты нигде не выводятся, числа форматируются
+         через InvariantCulture, сравнение подписей связей порядковое, а сортировка
+         категорий задана StringComparer.Ordinal явно. Отказ от ICU убирает из
+         публикации ~4 МБ и ускоряет холодный старт. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>
