@@ -89,8 +89,11 @@ public static class RelationshipDeduplicator
         first.FirstCharacterIdentifier == second.SecondCharacterIdentifier &&
         first.SecondCharacterIdentifier == second.FirstCharacterIdentifier;
 
+    // Сравнение по спанам: Deduplicate квадратичен по числу связей и зовёт это
+    // на каждой паре, а Trim() на строке создавал бы новую строку каждый раз.
     private static bool LabelsMatch(CharacterRelationship first, CharacterRelationship second) =>
-        string.Equals(first.Label.Trim(), second.Label.Trim(), StringComparison.OrdinalIgnoreCase);
+        first.Label.AsSpan().Trim().Equals(
+            second.Label.AsSpan().Trim(), StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>Результат проверки новой связи на дубликаты.</summary>
