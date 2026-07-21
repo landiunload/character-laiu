@@ -30,21 +30,35 @@ window.charlaiuGraph = (() => {
   let edges = [];
   let spawnedNodesCounter = 0;
 
+  // Плоские снимки Map для горячих циклов: обход массива не создаёт пар [ключ, значение]
+  // на каждой итерации, в отличие от перебора самой Map. Пересобираются только в setData.
+  let nodeIds = [];
+  let nodeList = [];
+
   let draggedNodeId = null;
   let hoveredNodeId = null;
   let hoveredEdgeId = null;
   let pointerWasDragged = false;
   let simulationIsAsleep = false;
 
-  /** Цвета берутся из CSS-переменных активной темы при каждой отрисовке. */
+  /**
+   * Цвета активной темы. getComputedStyle заставляет браузер пересчитать стили,
+   * поэтому результат кешируется: тема меняется редко, а кадров — 60 в секунду.
+   * Кеш сбрасывает refresh(), который вызывается после смены темы.
+   */
+  let cachedThemeColors = null;
+
   function readThemeColors() {
+    if (cachedThemeColors !== null) { return cachedThemeColors; }
+
     const style = getComputedStyle(document.documentElement);
-    return {
+    cachedThemeColors = {
       surface: style.getPropertyValue("--surface-color").trim() || "#ffffff",
       background: style.getPropertyValue("--background-color").trim() || "#faf7f2",
       text: style.getPropertyValue("--text-color").trim() || "#2b2a27",
       accent: style.getPropertyValue("--accent-color").trim() || "#2f6f6a"
     };
+    return cachedThemeColors;
   }
 
   /** Перевод координат события мыши в «мировые» координаты холста 800×520. */
@@ -58,24 +72,34 @@ window.charlaiuGraph = (() => {
 
   function findNodeAt(worldPoint) {
     let foundNodeId = null;
-    for (const [nodeId, node] of nodesById) {
+    for (let nodeIndex = 0; nodeIndex < nodeList.length; nodeIndex++) {
+      const node = nodeList[nodeIndex];
       const deltaX = worldPoint.x - node.x;
       const deltaY = worldPoint.y - node.y;
       const hitRadius = NODE_RADIUS * (node.scale || 1);
       if (deltaX * deltaX + deltaY * deltaY <= hitRadius * hitRadius) {
-        foundNodeId = nodeId; // последний в порядке отрисовки — визуально верхний
+        foundNodeId = nodeIds[nodeIndex]; // последний в порядке отрисовки — визуально верхний
       }
     }
     return foundNodeId;
   }
 
-  /** Точка квадратичной кривой Безье при параметре t. */
+  /**
+   * Точка квадратичной кривой Безье при параметре t.
+   * Результат кладётся в общий буфер, а не в новый объект: функция зовётся
+   * тысячи раз за кадр (физика, попадание курсора), и мусор от неё был бы
+   * основным источником пауз сборщика. Читать сразу, не сохраняя ссылку.
+   */
+  const curvePointBuffer = { x: 0, y: 0 };
+
   function quadraticPoint(geometry, t) {
     const inverseT = 1 - t;
-    return {
-      x: inverseT * inverseT * geometry.sourceX + 2 * inverseT * t * geometry.controlX + t * t * geometry.targetX,
-      y: inverseT * inverseT * geometry.sourceY + 2 * inverseT * t * geometry.controlY + t * t * geometry.targetY
-    };
+    const squaredInverseT = inverseT * inverseT;
+    const doubleCross = 2 * inverseT * t;
+    const squaredT = t * t;
+    curvePointBuffer.x = squaredInverseT * geometry.sourceX + doubleCross * geometry.controlX + squaredT * geometry.targetX;
+    curvePointBuffer.y = squaredInverseT * geometry.sourceY + doubleCross * geometry.controlY + squaredT * geometry.targetY;
+    return curvePointBuffer;
   }
 
   /** Поиск связи под курсором: расстояние до выборки точек кривой. */
@@ -84,7 +108,7 @@ window.charlaiuGraph = (() => {
     let foundEdgeId = null;
 
     for (const edge of edges) {
-      if (!edge.geometry) { continue; }
+      if (!edge.geometry.isValid) { continue; }
       for (let sampleIndex = 1; sampleIndex < 16; sampleIndex++) {
         const curvePoint = quadraticPoint(edge.geometry, sampleIndex / 16);
         const deltaX = worldPoint.x - curvePoint.x;
@@ -103,55 +127,82 @@ window.charlaiuGraph = (() => {
   // ----- Геометрия рёбер (общая для физики, отрисовки и попадания курсора) -----
 
   /**
-   * Считает контрольные точки дуг: параллельные связи одной пары расходятся
-   * в обе стороны от канонической нормали пары. Порядок связей в списке
-   * определяет, какая дуга окажется ближе к прямой.
+   * Раскладка дуг: параллельные связи одной пары расходятся в обе стороны от
+   * канонической нормали пары, а порядок связей в списке решает, какая дуга
+   * окажется ближе к прямой. Состав пар меняется только вместе с данными графа,
+   * поэтому группировка считается один раз в setData, а не 120 раз в секунду.
    */
-  function computeEdgeGeometries() {
+  function rebuildEdgeLayout() {
     const edgesByPairKey = new Map();
+
     for (const edge of edges) {
-      edge.geometry = null;
-      if (!nodesById.has(edge.a) || !nodesById.has(edge.b)) { continue; }
+      edge.geometry.isValid = nodesById.has(edge.a) && nodesById.has(edge.b);
+      if (!edge.geometry.isValid) { continue; }
+
       const pairKey = edge.a < edge.b ? edge.a + "|" + edge.b : edge.b + "|" + edge.a;
-      if (!edgesByPairKey.has(pairKey)) { edgesByPairKey.set(pairKey, []); }
-      edgesByPairKey.get(pairKey).push(edge);
+      let parallelEdges = edgesByPairKey.get(pairKey);
+      if (parallelEdges === undefined) {
+        parallelEdges = [];
+        edgesByPairKey.set(pairKey, parallelEdges);
+      }
+      parallelEdges.push(edge);
     }
 
-    for (const [pairKey, parallelEdges] of edgesByPairKey) {
-      const [canonicalFirstId, canonicalSecondId] = pairKey.split("|");
-      const canonicalFirstNode = nodesById.get(canonicalFirstId);
-      const canonicalSecondNode = nodesById.get(canonicalSecondId);
-
-      const canonicalDeltaX = canonicalSecondNode.x - canonicalFirstNode.x;
-      const canonicalDeltaY = canonicalSecondNode.y - canonicalFirstNode.y;
-      const canonicalDistance = Math.max(Math.hypot(canonicalDeltaX, canonicalDeltaY), 1);
-      const normalX = -canonicalDeltaY / canonicalDistance;
-      const normalY = canonicalDeltaX / canonicalDistance;
+    for (const parallelEdges of edgesByPairKey.values()) {
+      // Нормаль пары считается от меньшего идентификатора к большему,
+      // чтобы встречные связи расходились в разные стороны, а не совпадали
+      const [canonicalFirstEdge] = parallelEdges;
+      const canonicalFirstId = canonicalFirstEdge.a < canonicalFirstEdge.b ? canonicalFirstEdge.a : canonicalFirstEdge.b;
+      const canonicalSecondId = canonicalFirstEdge.a < canonicalFirstEdge.b ? canonicalFirstEdge.b : canonicalFirstEdge.a;
 
       for (let parallelIndex = 0; parallelIndex < parallelEdges.length; parallelIndex++) {
         const edge = parallelEdges[parallelIndex];
-        const sourceNode = nodesById.get(edge.a);
-        const targetNode = nodesById.get(edge.b);
-
-        const arcOffset = (parallelIndex - (parallelEdges.length - 1) / 2.0) * 62;
-        edge.geometry = {
-          sourceX: sourceNode.x, sourceY: sourceNode.y,
-          targetX: targetNode.x, targetY: targetNode.y,
-          controlX: (sourceNode.x + targetNode.x) / 2 + normalX * arcOffset * 2,
-          controlY: (sourceNode.y + targetNode.y) / 2 + normalY * arcOffset * 2
-        };
+        edge.canonicalFirstNode = nodesById.get(canonicalFirstId);
+        edge.canonicalSecondNode = nodesById.get(canonicalSecondId);
+        edge.sourceNode = nodesById.get(edge.a);
+        edge.targetNode = nodesById.get(edge.b);
+        edge.arcOffset = (parallelIndex - (parallelEdges.length - 1) / 2.0) * 124;
       }
+    }
+  }
+
+  /**
+   * Пересчитывает контрольные точки дуг под текущие координаты узлов.
+   * Зовётся дважды за кадр (после физики и перед отрисовкой), поэтому только
+   * арифметика: ни одного нового объекта, строки или Map.
+   */
+  function computeEdgeGeometries() {
+    for (const edge of edges) {
+      const geometry = edge.geometry;
+      if (!geometry.isValid) { continue; }
+
+      const canonicalDeltaX = edge.canonicalSecondNode.x - edge.canonicalFirstNode.x;
+      const canonicalDeltaY = edge.canonicalSecondNode.y - edge.canonicalFirstNode.y;
+      const canonicalDistance = Math.max(Math.hypot(canonicalDeltaX, canonicalDeltaY), 1);
+      const arcScale = edge.arcOffset / canonicalDistance;
+
+      const sourceNode = edge.sourceNode;
+      const targetNode = edge.targetNode;
+
+      geometry.sourceX = sourceNode.x;
+      geometry.sourceY = sourceNode.y;
+      geometry.targetX = targetNode.x;
+      geometry.targetY = targetNode.y;
+      geometry.controlX = (sourceNode.x + targetNode.x) / 2 - canonicalDeltaY * arcScale;
+      geometry.controlY = (sourceNode.y + targetNode.y) / 2 + canonicalDeltaX * arcScale;
     }
   }
 
   // ----- Физика -----
 
   function applySimulationStep() {
-    const nodes = [...nodesById.values()];
+    const nodes = nodeList;
+    const nodeCount = nodes.length;
 
-    for (let firstIndex = 0; firstIndex < nodes.length; firstIndex++) {
-      for (let secondIndex = firstIndex + 1; secondIndex < nodes.length; secondIndex++) {
-        const firstNode = nodes[firstIndex];
+    for (let firstIndex = 0; firstIndex < nodeCount; firstIndex++) {
+      const firstNode = nodes[firstIndex];
+
+      for (let secondIndex = firstIndex + 1; secondIndex < nodeCount; secondIndex++) {
         const secondNode = nodes[secondIndex];
 
         let deltaX = secondNode.x - firstNode.x;
@@ -175,9 +226,9 @@ window.charlaiuGraph = (() => {
     }
 
     for (const edge of edges) {
-      const sourceNode = nodesById.get(edge.a);
-      const targetNode = nodesById.get(edge.b);
-      if (!sourceNode || !targetNode) { continue; }
+      if (!edge.geometry.isValid) { continue; }
+      const sourceNode = edge.sourceNode;
+      const targetNode = edge.targetNode;
 
       const deltaX = targetNode.x - sourceNode.x;
       const deltaY = targetNode.y - sourceNode.y;
@@ -192,16 +243,29 @@ window.charlaiuGraph = (() => {
 
     // Узлы отталкиваются от чужих линий связи — линии не ложатся на персонажей
     computeEdgeGeometries();
+    const edgeNodeRangeSquared = EDGE_NODE_RANGE * EDGE_NODE_RANGE;
+
     for (const edge of edges) {
-      if (!edge.geometry) { continue; }
-      for (const [nodeId, node] of nodesById) {
-        if (nodeId === edge.a || nodeId === edge.b) { continue; }
+      const geometry = edge.geometry;
+      if (!geometry.isValid) { continue; }
+
+      // Дуга не достаёт до узлов за пределами описанного вокруг неё прямоугольника —
+      // грубая отбраковка снимает вложенный цикл выборки с большинства пар
+      const boundsMinX = Math.min(geometry.sourceX, geometry.targetX, geometry.controlX) - EDGE_NODE_RANGE;
+      const boundsMaxX = Math.max(geometry.sourceX, geometry.targetX, geometry.controlX) + EDGE_NODE_RANGE;
+      const boundsMinY = Math.min(geometry.sourceY, geometry.targetY, geometry.controlY) - EDGE_NODE_RANGE;
+      const boundsMaxY = Math.max(geometry.sourceY, geometry.targetY, geometry.controlY) + EDGE_NODE_RANGE;
+
+      for (let nodeIndex = 0; nodeIndex < nodeCount; nodeIndex++) {
+        const node = nodes[nodeIndex];
+        if (node === edge.sourceNode || node === edge.targetNode) { continue; }
+        if (node.x < boundsMinX || node.x > boundsMaxX || node.y < boundsMinY || node.y > boundsMaxY) { continue; }
 
         // Ближайшая из выборки точек кривой
         let nearestDeltaX = 0, nearestDeltaY = 0;
         let nearestDistanceSquared = Infinity;
         for (let sampleIndex = 1; sampleIndex < 8; sampleIndex++) {
-          const curvePoint = quadraticPoint(edge.geometry, sampleIndex / 8);
+          const curvePoint = quadraticPoint(geometry, sampleIndex / 8);
           const deltaX = node.x - curvePoint.x;
           const deltaY = node.y - curvePoint.y;
           const distanceSquared = deltaX * deltaX + deltaY * deltaY;
@@ -212,17 +276,18 @@ window.charlaiuGraph = (() => {
           }
         }
 
-        const distance = Math.sqrt(Math.max(nearestDistanceSquared, 100));
-        if (distance >= EDGE_NODE_RANGE) { continue; }
+        if (nearestDistanceSquared >= edgeNodeRangeSquared) { continue; }
 
-        const pushForce = EDGE_NODE_REPULSION / (distance * distance);
-        node.vx += pushForce * nearestDeltaX / distance;
-        node.vy += pushForce * nearestDeltaY / distance;
+        const distance = Math.sqrt(Math.max(nearestDistanceSquared, 100));
+        const pushForce = EDGE_NODE_REPULSION / (distance * distance * distance);
+        node.vx += pushForce * nearestDeltaX;
+        node.vy += pushForce * nearestDeltaY;
       }
     }
 
     let totalKineticEnergy = 0;
-    for (const node of nodesById.values()) {
+    for (let nodeIndex = 0; nodeIndex < nodeCount; nodeIndex++) {
+      const node = nodes[nodeIndex];
       if (node.pinned) { node.vx = 0; node.vy = 0; continue; }
 
       node.vx += (WORLD_WIDTH / 2 - node.x) * CENTERING_STRENGTH;
@@ -237,7 +302,9 @@ window.charlaiuGraph = (() => {
 
     // Плавные анимации наведения и перетаскивания
     let animationsAreSettled = true;
-    for (const [nodeId, node] of nodesById) {
+    for (let nodeIndex = 0; nodeIndex < nodeCount; nodeIndex++) {
+      const node = nodes[nodeIndex];
+      const nodeId = nodeIds[nodeIndex];
       node.targetScale = nodeId === draggedNodeId ? 1.18 : nodeId === hoveredNodeId ? 1.1 : 1;
       node.scale += (node.targetScale - node.scale) * HOVER_ANIMATION_SPEED;
       if (Math.abs(node.targetScale - node.scale) > 0.004) { animationsAreSettled = false; }
@@ -322,8 +389,8 @@ window.charlaiuGraph = (() => {
     const labelDrawQueue = [];
 
     for (const edge of edges) {
-      if (!edge.geometry) { continue; }
       const geometry = edge.geometry;
+      if (!geometry.isValid) { continue; }
 
       // Подсвеченная связь плавно утолщается и становится ярче
       renderingContext.beginPath();
@@ -367,11 +434,12 @@ window.charlaiuGraph = (() => {
       });
     }
 
-    for (const [nodeId, node] of nodesById) {
+    for (let nodeIndex = 0; nodeIndex < nodeList.length; nodeIndex++) {
+      const node = nodeList[nodeIndex];
       const radius = NODE_RADIUS * node.scale;
 
       // Перетаскиваемый узел «приподнимается» — мягкая тень под ним
-      if (nodeId === draggedNodeId || node.scale > 1.12) {
+      if (nodeIds[nodeIndex] === draggedNodeId || node.scale > 1.12) {
         renderingContext.shadowColor = "rgba(0, 0, 0, 0.35)";
         renderingContext.shadowBlur = 14 * (node.scale - 1) * 6;
         renderingContext.shadowOffsetY = 3;
@@ -627,14 +695,29 @@ window.charlaiuGraph = (() => {
         }
       }
 
+      // Снимки Map для горячих циклов физики и отрисовки
+      nodeIds = [...nodesById.keys()];
+      nodeList = [...nodesById.values()];
+
       // Состояние подсветки переживает обновление данных
       const previousHover = new Map(edges.map(edge => [edge.id, edge.hoverT]));
-      edges = graphEdges.map(edge => ({ ...edge, hoverT: previousHover.get(edge.id) || 0, geometry: null }));
+      edges = graphEdges.map(edge => ({
+        ...edge,
+        hoverT: previousHover.get(edge.id) || 0,
+        // Буфер геометрии живёт столько же, сколько связь: кадр только переписывает числа
+        geometry: { isValid: false, sourceX: 0, sourceY: 0, targetX: 0, targetY: 0, controlX: 0, controlY: 0 },
+        canonicalFirstNode: null, canonicalSecondNode: null,
+        sourceNode: null, targetNode: null, arcOffset: 0
+      }));
+      rebuildEdgeLayout();
       wakeSimulation();
     },
 
-    /** Будит симуляцию — например, после смены темы оформления. */
-    refresh() { wakeSimulation(); },
+    /** Будит симуляцию и перечитывает цвета — например, после смены темы оформления. */
+    refresh() {
+      cachedThemeColors = null;
+      wakeSimulation();
+    },
 
     /** Останавливает анимацию и снимает обработчики. */
     dispose() {
@@ -658,7 +741,10 @@ window.charlaiuGraph = (() => {
       canvasElement = null;
       renderingContext = null;
       dotNetReference = null;
+      cachedThemeColors = null;
       nodesById.clear();
+      nodeIds = [];
+      nodeList = [];
       edges = [];
       spawnedNodesCounter = 0;
       draggedNodeId = null;
