@@ -10,6 +10,11 @@
 
 <PageTitle>character laiu — анкета персонажа</PageTitle>
 
+@{
+    // Указатели строятся один раз на отрисовку — дальше разметка только читает готовое
+    RebuildDerivedIndexes();
+}
+
 <div class="application-layout">
     <aside class="characters-sidebar">
         <header class="sidebar-header">
@@ -191,10 +196,10 @@
                     </div>
                 }
 
-                @if (VisibleRelationships().Any())
+                @if (_visibleRelationships.Count > 0)
                 {
                     <ul class="relationships-list">
-                        @foreach (var relationship in VisibleRelationships())
+                        @foreach (var relationship in _visibleRelationships)
                         {
                             <li class="relationship-item" data-relationship-id="@relationship.Identifier"
                                 @oncontextmenu="mouseEvent => ShowRelationshipRowMenuAsync(relationship.Identifier, mouseEvent)"
@@ -311,6 +316,11 @@
 @code {
     private List<CharacterProfile> _allCharacterProfiles = [];
     private List<CharacterRelationship> _allRelationships = [];
+
+    // Производные от двух списков выше; пересобираются в RebuildDerivedIndexes
+    private readonly Dictionary<Guid, CharacterProfile> _profilesByIdentifier = [];
+    private readonly List<CharacterRelationship> _visibleRelationships = [];
+
     private CharacterProfile? _selectedCharacterProfile;
     private string _currentThemeName = "light";
     private string _activeViewName = "questionnaire";
@@ -383,6 +393,9 @@
     {
         if (!_graphIsInitialized) { return; }
 
+        // Данные могли измениться после последней отрисовки — берём свежий срез
+        RebuildDerivedIndexes();
+
         var graphNodes = _allCharacterProfiles
             .Select(profile => new GraphNodeDto(
                 profile.Identifier.ToString(),
@@ -390,7 +403,7 @@
                 profile.Identifier == _relationshipFilterIdentifier))
             .ToList();
 
-        var graphEdges = VisibleRelationships()
+        var graphEdges = _visibleRelationships
             .Select(relationship => new GraphEdgeDto(
                 relationship.Identifier.ToString(),
                 relationship.FirstCharacterIdentifier.ToString(),
@@ -608,7 +621,7 @@
         string.IsNullOrWhiteSpace(characterProfile.DisplayName) ? "Без имени" : characterProfile.DisplayName;
 
     private string NameByIdentifier(Guid characterIdentifier) =>
-        _allCharacterProfiles.FirstOrDefault(profile => profile.Identifier == characterIdentifier) is { } foundProfile
+        _profilesByIdentifier.TryGetValue(characterIdentifier, out var foundProfile)
             ? DisplayNameOf(foundProfile)
             : "?";
 
@@ -764,23 +777,38 @@
         await PersistChangesAsync();
     }
 
-    /// <summary>Связи с существующими участниками; при активном фильтре — только связи выбранного героя.</summary>
-    private IEnumerable<CharacterRelationship> VisibleRelationships()
+    /// <summary>
+    /// Пересобирает указатель «идентификатор → герой» и список видимых связей.
+    /// Зовётся один раз в начале отрисовки и перед отправкой данных в граф: списки
+    /// строятся за один проход вместо перебора всех героев на каждую связь.
+    /// </summary>
+    private void RebuildDerivedIndexes()
     {
-        var existingIdentifiers = _allCharacterProfiles.Select(profile => profile.Identifier).ToHashSet();
-
-        var aliveRelationships = _allRelationships.Where(relationship =>
-            existingIdentifiers.Contains(relationship.FirstCharacterIdentifier) &&
-            existingIdentifiers.Contains(relationship.SecondCharacterIdentifier));
-
-        if (_relationshipFilterIdentifier is { } filterIdentifier)
+        _profilesByIdentifier.Clear();
+        foreach (var profile in _allCharacterProfiles)
         {
-            aliveRelationships = aliveRelationships.Where(relationship =>
-                relationship.FirstCharacterIdentifier == filterIdentifier ||
-                relationship.SecondCharacterIdentifier == filterIdentifier);
+            _profilesByIdentifier[profile.Identifier] = profile;
         }
 
-        return aliveRelationships;
+        _visibleRelationships.Clear();
+        foreach (var relationship in _allRelationships)
+        {
+            // Связь живёт, только пока живы оба участника
+            if (!_profilesByIdentifier.ContainsKey(relationship.FirstCharacterIdentifier) ||
+                !_profilesByIdentifier.ContainsKey(relationship.SecondCharacterIdentifier))
+            {
+                continue;
+            }
+
+            if (_relationshipFilterIdentifier is { } filterIdentifier &&
+                relationship.FirstCharacterIdentifier != filterIdentifier &&
+                relationship.SecondCharacterIdentifier != filterIdentifier)
+            {
+                continue;
+            }
+
+            _visibleRelationships.Add(relationship);
+        }
     }
 
     private async Task AddRelationshipAsync()
@@ -879,7 +907,8 @@
 
         try
         {
-            var importedProfile = System.Text.Json.JsonSerializer.Deserialize<CharacterProfile>(importedJson);
+            var importedProfile = System.Text.Json.JsonSerializer.Deserialize(
+                importedJson, CharlaiuJsonContext.Default.CharacterProfile);
             if (importedProfile is null) { return; }
 
             // Новый идентификатор защищает от конфликта с уже существующим героем
