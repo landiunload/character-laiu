@@ -8,12 +8,13 @@ namespace Charlaiu.Web.Services;
 /// <summary>Экспорт анкеты в JSON — резервная копия, пригодная для импорта обратно.</summary>
 public sealed class JsonQuestionnaireExporter : IQuestionnaireExporter
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new()
+    // Отдельный экземпляр контекста: те же сгенерированные сериализаторы,
+    // но с отступами и без экранирования кириллицы в \uXXXX
+    private static readonly CharlaiuJsonContext ReadableJsonContext = new(new JsonSerializerOptions
     {
         WriteIndented = true,
-        // Кириллица в файле должна оставаться читаемой, а не превращаться в \uXXXX
         Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
-    };
+    });
 
     /// <inheritdoc />
     public string FileExtension => "json";
@@ -23,5 +24,5 @@ public sealed class JsonQuestionnaireExporter : IQuestionnaireExporter
 
     /// <inheritdoc />
     public string Export(CharacterProfile characterProfile) =>
-        JsonSerializer.Serialize(characterProfile, SerializerOptions);
+        JsonSerializer.Serialize(characterProfile, ReadableJsonContext.CharacterProfile);
 }

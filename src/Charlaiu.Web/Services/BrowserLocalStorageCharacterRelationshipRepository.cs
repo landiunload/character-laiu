@@ -22,7 +22,7 @@ public sealed class BrowserLocalStorageCharacterRelationshipRepository(IJSRuntim
 
         try
         {
-            return JsonSerializer.Deserialize<List<CharacterRelationship>>(storedJson) ?? [];
+            return JsonSerializer.Deserialize(storedJson, CharlaiuJsonContext.Default.ListCharacterRelationship) ?? [];
         }
         catch (JsonException)
         {
@@ -33,7 +33,7 @@ public sealed class BrowserLocalStorageCharacterRelationshipRepository(IJSRuntim
     /// <inheritdoc />
     public async Task SaveAllRelationshipsAsync(List<CharacterRelationship> characterRelationships)
     {
-        var serializedRelationships = JsonSerializer.Serialize(characterRelationships);
+        var serializedRelationships = JsonSerializer.Serialize(characterRelationships, CharlaiuJsonContext.Default.ListCharacterRelationship);
         await javascriptRuntime.InvokeVoidAsync("localStorage.setItem", StorageKey, serializedRelationships);
     }
 }

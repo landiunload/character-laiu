@@ -14,11 +14,6 @@ public sealed class BrowserLocalStorageCharacterProfileRepository(IJSRuntime jav
 {
     private const string StorageKey = "charlaiu.characterProfiles";
 
-    private static readonly JsonSerializerOptions SerializerOptions = new()
-    {
-        WriteIndented = false
-    };
-
     /// <inheritdoc />
     public async Task<List<CharacterProfile>> LoadAllProfilesAsync()
     {
@@ -31,7 +26,7 @@ public sealed class BrowserLocalStorageCharacterProfileRepository(IJSRuntime jav
 
         try
         {
-            return JsonSerializer.Deserialize<List<CharacterProfile>>(storedJson, SerializerOptions) ?? [];
+            return JsonSerializer.Deserialize(storedJson, CharlaiuJsonContext.Default.ListCharacterProfile) ?? [];
         }
         catch (JsonException)
         {
@@ -43,7 +38,7 @@ public sealed class BrowserLocalStorageCharacterProfileRepository(IJSRuntime jav
     /// <inheritdoc />
     public async Task SaveAllProfilesAsync(List<CharacterProfile> characterProfiles)
     {
-        var serializedProfiles = JsonSerializer.Serialize(characterProfiles, SerializerOptions);
+        var serializedProfiles = JsonSerializer.Serialize(characterProfiles, CharlaiuJsonContext.Default.ListCharacterProfile);
         await javascriptRuntime.InvokeVoidAsync("localStorage.setItem", StorageKey, serializedProfiles);
     }
 }

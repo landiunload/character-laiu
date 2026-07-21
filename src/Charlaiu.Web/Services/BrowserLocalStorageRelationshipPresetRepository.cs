@@ -22,7 +22,7 @@ public sealed class BrowserLocalStorageRelationshipPresetRepository(IJSRuntime j
 
         try
         {
-            var loadedPresets = JsonSerializer.Deserialize<List<RelationshipPreset>>(storedJson);
+            var loadedPresets = JsonSerializer.Deserialize(storedJson, CharlaiuJsonContext.Default.ListRelationshipPreset);
             return loadedPresets is { Count: > 0 } ? loadedPresets : RelationshipPreset.CreateDefaultPresets();
         }
         catch (JsonException)
@@ -34,7 +34,7 @@ public sealed class BrowserLocalStorageRelationshipPresetRepository(IJSRuntime j
     /// <inheritdoc />
     public async Task SaveAllPresetsAsync(List<RelationshipPreset> relationshipPresets)
     {
-        var serializedPresets = JsonSerializer.Serialize(relationshipPresets);
+        var serializedPresets = JsonSerializer.Serialize(relationshipPresets, CharlaiuJsonContext.Default.ListRelationshipPreset);
         await javascriptRuntime.InvokeVoidAsync("localStorage.setItem", StorageKey, serializedPresets);
     }
 }
