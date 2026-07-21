@@ -19,38 +19,59 @@ public sealed class MarkdownQuestionnaireExporter : IQuestionnaireExporter
     public string Export(CharacterProfile characterProfile)
     {
         var markdownBuilder = new StringBuilder();
-        markdownBuilder.AppendLine($"# {characterProfile.DisplayName}");
+        markdownBuilder.Append("# ").AppendLine(characterProfile.DisplayName);
         markdownBuilder.AppendLine();
 
         foreach (var section in characterProfile.Sections)
         {
-            var fieldsWithValues = section.Fields.Where(field => field.HasAnyValue).ToList();
-            if (fieldsWithValues.Count == 0)
+            // Один проход по полям вместо четырёх (ToList + Any + два Where):
+            // ни промежуточного списка, ни итераторов LINQ на каждый раздел
+            var hasPairedValues = false;
+            var hasAnyValue = false;
+
+            foreach (var field in section.Fields)
+            {
+                if (!field.HasAnyValue) { continue; }
+                hasAnyValue = true;
+                hasPairedValues |= field.FieldType == QuestionnaireFieldType.PairedValues;
+            }
+
+            if (!hasAnyValue)
             {
                 continue;
             }
 
-            markdownBuilder.AppendLine($"## {section.Icon} {section.Title}");
+            markdownBuilder.Append("## ").Append(section.Icon).Append(' ').AppendLine(section.Title);
             markdownBuilder.AppendLine();
 
-            if (fieldsWithValues.Any(field => field.FieldType == QuestionnaireFieldType.PairedValues))
+            if (hasPairedValues)
             {
                 // Парные поля оформляем таблицей
-                markdownBuilder.AppendLine($"| | {section.FirstColumnLabel ?? "Первое"} | {section.SecondColumnLabel ?? "Второе"} |");
+                markdownBuilder
+                    .Append("| | ").Append(section.FirstColumnLabel ?? "Первое")
+                    .Append(" | ").Append(section.SecondColumnLabel ?? "Второе")
+                    .AppendLine(" |");
                 markdownBuilder.AppendLine("|---|---|---|");
 
-                foreach (var pairedField in fieldsWithValues.Where(field => field.FieldType == QuestionnaireFieldType.PairedValues))
+                foreach (var field in section.Fields)
                 {
-                    markdownBuilder.AppendLine(
-                        $"| **{pairedField.Label}** | {pairedField.PrimaryValue} | {pairedField.SecondaryValue} |");
+                    if (!field.HasAnyValue || field.FieldType != QuestionnaireFieldType.PairedValues) { continue; }
+
+                    markdownBuilder
+                        .Append("| **").Append(field.Label)
+                        .Append("** | ").Append(field.PrimaryValue)
+                        .Append(" | ").Append(field.SecondaryValue)
+                        .AppendLine(" |");
                 }
 
                 markdownBuilder.AppendLine();
             }
 
-            foreach (var regularField in fieldsWithValues.Where(field => field.FieldType != QuestionnaireFieldType.PairedValues))
+            foreach (var field in section.Fields)
             {
-                markdownBuilder.AppendLine($"**{regularField.Label}:** {regularField.PrimaryValue}");
+                if (!field.HasAnyValue || field.FieldType == QuestionnaireFieldType.PairedValues) { continue; }
+
+                markdownBuilder.Append("**").Append(field.Label).Append(":** ").AppendLine(field.PrimaryValue);
                 markdownBuilder.AppendLine();
             }
         }
