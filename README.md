@@ -23,7 +23,7 @@
 
 ## Стек технологий
 
-- **.NET 9 / Blazor WebAssembly** — весь код приложения на C#, выполняется в браузере
+- **.NET 10 / Blazor WebAssembly** — весь код приложения на C#, выполняется в браузере
 - **System.Text.Json с генератором сериализаторов** — хранение и экспорт без рефлексии
 - **Canvas 2D** — граф связей рисуется и считается в JavaScript, вне цикла отрисовки Blazor
 - **xUnit** — модульные тесты домена и экспортёров
@@ -71,7 +71,7 @@ tests/Charlaiu.UnitTests/
 
 ## Запуск
 
-Нужен установленный [.NET SDK 9](https://dotnet.microsoft.com/download/dotnet/9.0):
+Нужен установленный [.NET SDK 10](https://dotnet.microsoft.com/download/dotnet/10.0):
 
 ```bash
 dotnet run --project src/Charlaiu.Web
