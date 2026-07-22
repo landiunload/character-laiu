@@ -12,7 +12,9 @@ namespace Charlaiu.Web.Services;
 /// </summary>
 [JsonSourceGenerationOptions(WriteIndented = false)]
 [JsonSerializable(typeof(CharacterProfile))]
+// Список анкет нужен только переносу сохранений первой версии формата
 [JsonSerializable(typeof(List<CharacterProfile>))]
+[JsonSerializable(typeof(List<Guid>))]
 [JsonSerializable(typeof(List<CharacterRelationship>))]
 [JsonSerializable(typeof(List<RelationshipPreset>))]
 internal sealed partial class CharlaiuJsonContext : JsonSerializerContext;

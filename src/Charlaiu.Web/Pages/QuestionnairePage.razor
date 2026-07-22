@@ -653,11 +653,17 @@
         return field.HasAnyValue ? cssClass : cssClass + " empty-field";
     }
 
-    /// <summary>Сохраняет всех героев и отмечает выбранного изменённым.</summary>
+    /// <summary>
+    /// Сохраняет выбранного героя и отмечает его изменённым.
+    /// Пишется только он: остальные анкеты лежат под своими ключами и правкой
+    /// не затронуты — от этого зависит скорость набора текста.
+    /// </summary>
     private async Task PersistChangesAsync()
     {
-        _selectedCharacterProfile?.MarkAsUpdated();
-        await CharacterProfileRepository.SaveAllProfilesAsync(_allCharacterProfiles);
+        if (_selectedCharacterProfile is null) { return; }
+
+        _selectedCharacterProfile.MarkAsUpdated();
+        await CharacterProfileRepository.SaveProfileAsync(_selectedCharacterProfile);
     }
 
     private void ToggleIconPicker(Guid sectionIdentifier) =>
@@ -726,7 +732,7 @@
             _relationshipFilterIdentifier = null;
         }
 
-        await PersistChangesAsync();
+        await CharacterProfileRepository.RemoveProfileAsync(deletedIdentifier);
         await CharacterRelationshipRepository.SaveAllRelationshipsAsync(_allRelationships);
     }
 
