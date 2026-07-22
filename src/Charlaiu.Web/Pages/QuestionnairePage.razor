@@ -418,21 +418,22 @@
 
     // ----- Контекстное меню узла (события приходят из JavaScript) -----
 
+    // Координаты клика сюда не передаются: строгая CSP запрещает инлайновый style,
+    // поэтому меню ставит на место сам JavaScript через CSSOM — там координаты уже есть.
+
     /// <summary>Показывает меню узла в точке клика.</summary>
     [JSInvokable]
-    public void ShowNodeContextMenuFromGraph(string nodeIdentifier, double clientX, double clientY)
+    public void ShowNodeContextMenuFromGraph(string nodeIdentifier)
     {
         if (!Guid.TryParse(nodeIdentifier, out var parsedIdentifier)) { return; }
 
-        // Координаты использует JavaScript: CSP запрещает инлайновый style,
-        // поэтому меню позиционируется через CSSOM после рендера
         _contextMenuNodeIdentifier = parsedIdentifier;
         StateHasChanged();
     }
 
     /// <summary>Показывает меню связи в точке клика по линии на графе.</summary>
     [JSInvokable]
-    public void ShowEdgeContextMenuFromGraph(string edgeIdentifier, double clientX, double clientY)
+    public void ShowEdgeContextMenuFromGraph(string edgeIdentifier)
     {
         if (!Guid.TryParse(edgeIdentifier, out var parsedIdentifier)) { return; }
 

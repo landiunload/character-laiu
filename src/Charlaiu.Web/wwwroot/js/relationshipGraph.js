@@ -560,7 +560,7 @@ window.charlaiuGraph = (() => {
 
     if (nodeId !== null) {
       dotNetReference
-        .invokeMethodAsync("ShowNodeContextMenuFromGraph", nodeId, pointerEvent.clientX, pointerEvent.clientY)
+        .invokeMethodAsync("ShowNodeContextMenuFromGraph", nodeId)
         .then(() => window.charlaiuInterop.positionContextMenu(pointerEvent.clientX, pointerEvent.clientY));
       return;
     }
@@ -568,7 +568,7 @@ window.charlaiuGraph = (() => {
     const edgeId = findEdgeAt(worldPoint);
     if (edgeId !== null) {
       dotNetReference
-        .invokeMethodAsync("ShowEdgeContextMenuFromGraph", edgeId, pointerEvent.clientX, pointerEvent.clientY)
+        .invokeMethodAsync("ShowEdgeContextMenuFromGraph", edgeId)
         .then(() => window.charlaiuInterop.positionContextMenu(pointerEvent.clientX, pointerEvent.clientY));
     }
   }
