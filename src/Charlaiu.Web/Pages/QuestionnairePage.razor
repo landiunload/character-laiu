@@ -898,12 +898,14 @@
     {
         const long maximumImportFileSizeBytes = 5 * 1024 * 1024;
 
-        using var importStreamReader = new StreamReader(
-            fileChangeEventArgs.File.OpenReadStream(maximumImportFileSizeBytes));
-        var importedJson = await importStreamReader.ReadToEndAsync();
-
         try
         {
+            // Чтение входит в try намеренно: превышение лимита размера выясняется
+            // только во время чтения потока и прилетает как IOException
+            using var importStreamReader = new StreamReader(
+                fileChangeEventArgs.File.OpenReadStream(maximumImportFileSizeBytes));
+            var importedJson = await importStreamReader.ReadToEndAsync();
+
             var importedProfile = System.Text.Json.JsonSerializer.Deserialize(
                 importedJson, CharlaiuJsonContext.Default.CharacterProfile);
             if (importedProfile is null) { return; }
@@ -917,6 +919,11 @@
         catch (System.Text.Json.JsonException)
         {
             await JavascriptRuntime.InvokeVoidAsync("alert", "Файл не похож на анкету героя — импорт отменён.");
+        }
+        catch (IOException)
+        {
+            await JavascriptRuntime.InvokeVoidAsync(
+                "alert", "Файл больше 5 МБ — это не анкета героя, импорт отменён.");
         }
     }
 }
