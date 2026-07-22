@@ -646,10 +646,6 @@
         }
     }
 
-    /// <summary>Число с точкой для SVG-координат независимо от языка системы.</summary>
-    private static string Fmt(double value) =>
-        value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
-
     /// <summary>CSS-классы строки поля: пустые поля скрываются в печатной версии.</summary>
     private static string FieldRowCssClass(QuestionnaireField field)
     {
